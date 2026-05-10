@@ -1,6 +1,16 @@
 from __future__ import annotations
 
+from math import hypot
+
 from .models import ALLOWED_ACTION_TYPES, WorldState
+
+
+def _closest_arrival_distance(world: WorldState) -> float | None:
+    dists = []
+    for ac in world.aircraft.values():
+        if ac.role == "arrival" and ac.status in {"airborne", "on_final", "go_around"}:
+            dists.append(hypot(ac.x_nm, ac.y_nm))
+    return min(dists) if dists else None
 
 
 def validate_actions(world: WorldState, actions: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -26,8 +36,18 @@ def validate_actions(world: WorldState, actions: list[dict]) -> tuple[list[dict]
                 reason = "invalid_speed"
             elif atype == "clear_to_land" and world.airport.runway_occupied_by:
                 reason = "runway_occupied"
+            elif atype == "clear_to_land" and ac.role != "arrival":
+                reason = "not_arrival"
+            elif atype == "clear_to_land" and ac.status not in {"airborne", "on_final"}:
+                reason = "not_on_final_or_arrival"
             elif atype == "clear_for_takeoff" and world.airport.runway_occupied_by:
                 reason = "runway_occupied"
+            elif atype == "clear_for_takeoff" and cs not in world.airport.departure_queue:
+                reason = "not_in_departure_queue"
+            elif atype == "clear_for_takeoff":
+                closest = _closest_arrival_distance(world)
+                if closest is not None and closest < world.rules.runway_arrival_protection_nm:
+                    reason = "arrival_too_close"
             elif atype == "go_around" and ac.status not in {"on_final", "airborne"}:
                 reason = "not_on_approach"
         if reason:

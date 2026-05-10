@@ -4,7 +4,7 @@ import json
 import math
 from pathlib import Path
 
-from .conflict_detection import detect_conflicts
+from .conflict_detection import detect_conflicts, predict_conflicts
 from .decision_points import detect_decision_points
 from .models import Aircraft, AirportState, RulesConfig, Weather, WorldState
 from .validator import validate_actions
@@ -23,7 +23,8 @@ def advance(world: WorldState) -> None:
                 world.airport.runway_occupied_by = ac.callsign
 
 
-def apply_actions(world: WorldState, actions: list[dict]) -> None:
+def apply_actions(world: WorldState, actions: list[dict]) -> dict:
+    go_arounds = 0
     for action in actions:
         ac = world.aircraft[action["aircraft"]]
         t = action["type"]
@@ -41,11 +42,35 @@ def apply_actions(world: WorldState, actions: list[dict]) -> None:
             ac.clearance = "cleared_for_takeoff"
             ac.status = "departed"
             world.airport.runway_occupied_by = ac.callsign
+            if ac.callsign in world.airport.departure_queue:
+                world.airport.departure_queue.remove(ac.callsign)
         elif t == "go_around":
             ac.status = "go_around"
             ac.vertical_rate_fpm = 1200
+            go_arounds += 1
         elif t in {"hold_short", "hold_position"}:
             ac.speed_kt = 0
+    return {"go_around_count": go_arounds}
+
+
+def apply_events(world: WorldState) -> list[dict]:
+    triggered: list[dict] = []
+    for event in world.events:
+        if event.get("applied"):
+            continue
+        if event.get("time_sec") != world.time_sec:
+            continue
+        event["applied"] = True
+        etype = event["type"]
+        if etype == "wind_change":
+            world.weather.wind_dir_deg = event["wind_dir_deg"]
+            world.weather.wind_speed_kt = event["wind_speed_kt"]
+            if "active_runway" in event:
+                world.airport.active_runway = event["active_runway"]
+        elif etype == "emergency_declare":
+            world.aircraft[event["aircraft"]].emergency = True
+        triggered.append({k: v for k, v in event.items() if k != "applied"})
+    return triggered
 
 
 def run(world: WorldState, agent, max_ticks: int, trace_path: Path) -> dict:
@@ -55,16 +80,33 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path) -> dict:
     loss_sep_count = 0
     min_h = float("inf")
     min_v = float("inf")
+    conflict_resolved_count = 0
+    prior_active_pairs: set[tuple[str, str]] = set()
+    conflict_predicted_times: list[int] = []
+    new_conflicts_created_by_action = 0
+    go_around_count = 0
 
     with trace_path.open("w", encoding="utf-8") as f:
         for _ in range(max_ticks):
+            triggered_events = apply_events(world)
             conflicts = detect_conflicts(world)
+            active_pairs = {tuple(sorted(c["aircraft"])) for c in conflicts}
+            if prior_active_pairs and len(active_pairs) < len(prior_active_pairs):
+                conflict_resolved_count += len(prior_active_pairs - active_pairs)
+            prior_active_pairs = active_pairs
+
             if conflicts:
                 loss_sep_count += len(conflicts)
                 min_h = min(min_h, min(c["horizontal_nm"] for c in conflicts))
                 min_v = min(min_v, min(c["vertical_ft"] for c in conflicts))
 
+            predictions = predict_conflicts(world)
+            conflict_predicted_times.extend(p["in_seconds"] for p in predictions)
             dps = detect_decision_points(world)
+            if triggered_events:
+                for event in triggered_events:
+                    dps.append({"type": "event", "event": event})
+
             actions = []
             obs = None
             invalid = []
@@ -74,15 +116,22 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path) -> dict:
                 instructions += len(actions)
                 valid, invalid = validate_actions(world, actions)
                 invalid_count += len(invalid)
-                apply_actions(world, valid)
+                before_count = len(conflicts)
+                effects = apply_actions(world, valid)
+                go_around_count += effects["go_around_count"]
+                after_count = len(detect_conflicts(world))
+                if after_count > before_count:
+                    new_conflicts_created_by_action += after_count - before_count
 
             event = {
                 "time": world.time_sec,
+                "triggered_events": triggered_events,
                 "decision_points": dps,
                 "observation": obs,
                 "actions": actions,
                 "invalid_actions": invalid,
                 "conflicts": conflicts,
+                "predicted_conflicts": predictions,
                 "state": world.snapshot(),
             }
             f.write(json.dumps(event) + "\n")
@@ -94,14 +143,27 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path) -> dict:
             if world.airport.runway_occupied_by:
                 world.airport.runway_occupied_by = None
 
-    landings = sum(1 for a in world.aircraft.values() if a.status == "landed")
-    departures = sum(1 for a in world.aircraft.values() if a.status == "departed")
-    score = max(0, 100 - loss_sep_count * 20 - invalid_count * 5 + landings * 3 + departures * 2)
+    arrivals = [a for a in world.aircraft.values() if a.role == "arrival"]
+    departures = [a for a in world.aircraft.values() if a.role == "departure"]
+    landings = sum(1 for a in arrivals if a.status == "landed")
+    departures_ok = sum(1 for a in departures if a.status == "departed")
+    arrival_delay = len(arrivals) - landings
+    departure_delay = len(departures) - departures_ok
+    emergency_handled_count = sum(1 for a in arrivals if a.emergency and a.status == "landed")
+
+    score = max(0, 100 - loss_sep_count * 20 - invalid_count * 5 + landings * 3 + departures_ok * 2)
     return {
         "score": score,
         "safety": {"loss_of_separation": loss_sep_count, "min_horizontal_nm": min_h if min_h < float("inf") else None, "min_vertical_ft": min_v if min_v < float("inf") else None},
-        "efficiency": {"successful_landings": landings, "successful_departures": departures},
+        "efficiency": {"successful_landings": landings, "successful_departures": departures_ok, "arrival_delay": arrival_delay, "departure_delay": departure_delay},
         "control_quality": {"instructions_issued": instructions, "invalid_commands": invalid_count},
+        "metrics": {
+            "conflict_predicted_time": min(conflict_predicted_times) if conflict_predicted_times else None,
+            "conflict_resolved_count": conflict_resolved_count,
+            "new_conflicts_created_by_action": new_conflicts_created_by_action,
+            "go_around_count": go_around_count,
+            "emergency_handled_count": emergency_handled_count,
+        },
     }
 
 
@@ -115,4 +177,5 @@ def load_world(path: Path) -> WorldState:
         weather=Weather(**data.get("weather", {})),
         rules=RulesConfig(**data.get("rules", {})),
         aircraft=ac,
+        events=data.get("events", []),
     )

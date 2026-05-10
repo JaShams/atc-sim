@@ -1,6 +1,7 @@
-from atc_benchmark.simulator.engine import load_world
-from atc_benchmark.simulator.conflict_detection import detect_conflicts
 from pathlib import Path
+
+from atc_benchmark.simulator.conflict_detection import detect_conflicts, predict_conflicts
+from atc_benchmark.simulator.engine import load_world
 
 
 def test_detect_conflict_from_scenario():
@@ -11,3 +12,11 @@ def test_detect_conflict_from_scenario():
     world.aircraft["ARR2"].y_nm = 1
     conflicts = detect_conflicts(world)
     assert conflicts
+
+
+def test_predict_conflict_uses_lookahead_window():
+    world = load_world(Path("scenarios/crossing_conflict_001.json"))
+    world.rules.lookahead_seconds = 120
+    preds = predict_conflicts(world)
+    assert preds
+    assert min(p["in_seconds"] for p in preds) <= 120
