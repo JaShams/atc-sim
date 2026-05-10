@@ -17,13 +17,32 @@ TAKEOFF_RUNWAY_OCCUPANCY_SEC = 35
 LANDING_RUNWAY_OCCUPANCY_SEC = 50
 
 
+def _runway_heading_deg(runway_id: str) -> float:
+    n = int(runway_id)
+    return 360.0 if n == 36 else float(n * 10)
+
+
+def _angle_delta_deg(a: float, b: float) -> float:
+    return abs((a - b + 180) % 360 - 180)
+
+
+def _runway_is_wind_compliant(world: WorldState, threshold_deg: float = 45.0) -> bool:
+    heading = _runway_heading_deg(world.airport.active_runway)
+    return _angle_delta_deg(world.weather.wind_dir_deg, heading) < threshold_deg
+
+
+
 def advance(world: WorldState) -> None:
     dt_hr = world.tick_sec / 3600
     for ac in world.aircraft.values():
         if ac.status in {"airborne", "on_final", "go_around", "rolling", "airborne_departure"}:
             rad = math.radians(ac.heading_deg)
-            ac.x_nm += math.sin(rad) * ac.speed_kt * dt_hr
-            ac.y_nm += math.cos(rad) * ac.speed_kt * dt_hr
+            wind_to_deg = (world.weather.wind_dir_deg + 180) % 360
+            wind_rad = math.radians(wind_to_deg)
+            ground_vx_kt = math.sin(rad) * ac.speed_kt + math.sin(wind_rad) * world.weather.wind_speed_kt
+            ground_vy_kt = math.cos(rad) * ac.speed_kt + math.cos(wind_rad) * world.weather.wind_speed_kt
+            ac.x_nm += ground_vx_kt * dt_hr
+            ac.y_nm += ground_vy_kt * dt_hr
             ac.altitude_ft += ac.vertical_rate_fpm * (world.tick_sec / 60)
             if ac.role == "arrival" and abs(ac.x_nm) < 1.5 and abs(ac.y_nm) < 1.5 and ac.altitude_ft < 300:
                 ac.status = "landed"
@@ -107,6 +126,9 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
     total_conflict_time_gained_sec = 0.0
     conflict_time_gain_samples = 0
     go_around_count = 0
+    latest_wind_change_sec: int | None = None
+    wind_change_response_latency_sec: int | None = None
+    unsafe_clearances_after_wind_change = 0
     conflict_lifecycle_state: dict[str, dict] = {}
 
     def _update_lifecycle(predictions: list[dict], *, is_action_phase: bool) -> None:
@@ -146,6 +168,10 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
     with trace_path.open("w", encoding="utf-8") as f:
         for _ in range(max_ticks):
             triggered_events = apply_events(world)
+            for event in triggered_events:
+                if event.get("type") == "wind_change":
+                    latest_wind_change_sec = world.time_sec
+                    wind_change_response_latency_sec = None
             conflicts = detect_conflicts(world)
             if conflicts:
                 loss_sep_count += len(conflicts)
@@ -173,9 +199,14 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
                 invalid_count += len(invalid)
                 before_by_pair = {p["conflict_pair_id"]: p for p in predictions}
                 effects = apply_actions(world, valid)
+                if latest_wind_change_sec is not None and not _runway_is_wind_compliant(world):
+                    unsafe_clearances_after_wind_change += sum(1 for a in valid if a["type"] in {"clear_to_land", "clear_for_takeoff"})
                 go_around_count += effects["go_around_count"]
                 after_predictions = predict_conflicts(world)
                 _update_lifecycle(after_predictions, is_action_phase=True)
+
+            if latest_wind_change_sec is not None and wind_change_response_latency_sec is None and _runway_is_wind_compliant(world):
+                wind_change_response_latency_sec = world.time_sec - latest_wind_change_sec
 
             event = {
                 "time": world.time_sec,
@@ -252,6 +283,8 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
             "go_around_count": go_around_count,
             "emergency_handled_count": emergency_handled_count,
             "emergency_unhandled_count": emergency_unhandled_count,
+            "wind_change_response_latency_sec": wind_change_response_latency_sec,
+            "unsafe_clearances_after_wind_change": unsafe_clearances_after_wind_change,
         },
     }
     if manifest is not None:
