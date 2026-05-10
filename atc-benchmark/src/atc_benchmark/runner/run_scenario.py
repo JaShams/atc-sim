@@ -22,6 +22,7 @@ def build_agent(name: str):
 
 
 def build_manifest(scenario: Path, world, agent_name: str, max_ticks: int) -> dict:
+    scenario_doc = json.loads(scenario.read_text())
     return {
         "scenario_file": scenario.name,
         "scenario_hash": scenario_hash(scenario),
@@ -31,6 +32,7 @@ def build_manifest(scenario: Path, world, agent_name: str, max_ticks: int) -> di
         "rules_config": world.rules.__dict__.copy(),
         "scoring_config": world.scoring.__dict__.copy(),
         "package": {"name": "atc-benchmark", "version": __version__},
+        "scenario_metadata": scenario_doc.get("scenario_metadata", {}),
     }
 
 

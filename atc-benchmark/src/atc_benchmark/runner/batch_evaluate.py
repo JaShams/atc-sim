@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+from collections import Counter
 from pathlib import Path
 
 from atc_benchmark.runner.run_scenario import build_agent, build_manifest
@@ -25,8 +26,17 @@ def main() -> None:
     trace_dir.mkdir(parents=True, exist_ok=True)
 
     rows = []
+    tag_counter: Counter[str] = Counter()
+    tier_counter: Counter[str] = Counter()
     for scenario in scenarios:
         world = load_world(scenario)
+        scenario_doc = json.loads(scenario.read_text())
+        metadata = scenario_doc.get("scenario_metadata", {})
+        tags = metadata.get("tags", [])
+        tier = metadata.get("difficulty_tier")
+        tag_counter.update(tags)
+        if tier:
+            tier_counter[tier] += 1
         manifest = build_manifest(scenario, world, args.agent, args.max_ticks)
         result = run(world, build_agent(args.agent), args.max_ticks, trace_dir / f"{scenario.stem}.jsonl", manifest=manifest)
         (score_dir / f"{scenario.stem}.json").write_text(json.dumps(result, indent=2))
@@ -40,6 +50,8 @@ def main() -> None:
                 "runway_unsafe_clearance_count": result["metrics"]["runway_unsafe_clearance_count"],
                 "malformed_agent_outputs_count": result["metrics"]["malformed_agent_outputs_count"],
                 "throughput_ops_per_hour": result["metrics"]["throughput_ops_per_hour"],
+                "tags": tags,
+                "difficulty_tier": tier,
             }
         )
 
@@ -53,6 +65,7 @@ def main() -> None:
         "total_runway_unsafe_clearances": sum(r["runway_unsafe_clearance_count"] for r in rows),
         "total_malformed_agent_outputs": sum(r["malformed_agent_outputs_count"] for r in rows),
         "average_throughput_ops_per_hour": (sum(r["throughput_ops_per_hour"] for r in rows) / len(rows)) if rows else 0,
+        "coverage": {"by_tag": dict(sorted(tag_counter.items())), "by_difficulty_tier": dict(sorted(tier_counter.items()))},
         "scenarios": rows,
     }
     (out / "summary.json").write_text(json.dumps(summary, indent=2))
@@ -68,6 +81,8 @@ def main() -> None:
                 "runway_unsafe_clearance_count",
                 "malformed_agent_outputs_count",
                 "throughput_ops_per_hour",
+                "tags",
+                "difficulty_tier",
             ],
         )
         writer.writeheader()
