@@ -61,7 +61,8 @@ def test_secondary_conflicts_reduce_score(tmp_path):
     world.aircraft["A3"].y_nm = -5.0
     world.aircraft["A3"].heading_deg = 270
     result = run(world, ScriptedAgent([[{"aircraft": "A1", "type": "assign_heading", "heading": 90}]]), max_ticks=1, trace_path=tmp_path / "trace.jsonl")
-    assert result["score_breakdown"]["secondary_conflicts_created"] < 0
+    assert result["metrics"]["conflict_introduced_count"] >= 2
+    assert result["score_breakdown"]["secondary_conflicts_created"] == 0
 
 
 def test_resolving_conflict_improves_score(tmp_path):
@@ -110,3 +111,42 @@ def test_conflict_lifecycle_scores_multi_tick_transitions(tmp_path):
     assert result["score_breakdown"]["conflicts_delayed"] >= 0
     assert result["score_breakdown"]["conflicts_worsened"] <= 0
     assert result["score_breakdown"]["conflict_resolved"] > 0
+
+
+def test_conflict_lifecycle_oscillating_commands_track_transitions(tmp_path):
+    world = _world_for_predicted_conflict_tests()
+    agent = ScriptedAgent(
+        [
+            [{"aircraft": "A1", "type": "assign_speed", "speed_kt": 200}],
+            [{"aircraft": "A1", "type": "assign_speed", "speed_kt": 280}],
+            [{"aircraft": "A1", "type": "assign_speed", "speed_kt": 200}],
+            [{"aircraft": "A1", "type": "assign_heading", "heading": 90}],
+            [{"aircraft": "A1", "type": "assign_heading", "heading": 0}],
+        ]
+    )
+    result = run(world, agent, max_ticks=5, trace_path=tmp_path / "trace.jsonl")
+    metrics = result["metrics"]
+    assert metrics["conflicts_delayed_count"] > 0
+    assert metrics["conflicts_worsened_count"] > 0
+    assert metrics["conflict_resolved_count"] > 0
+    assert metrics["conflict_reintroduced_count"] > 0
+    assert metrics["secondary_conflicts_created_count"] == metrics["conflict_reintroduced_count"]
+
+
+def test_secondary_conflict_chain_counts_reintroductions_only(tmp_path):
+    world = _world_for_predicted_conflict_tests()
+    world.aircraft["A3"].x_nm = 6.0
+    world.aircraft["A3"].y_nm = -5.0
+    world.aircraft["A3"].heading_deg = 270
+    agent = ScriptedAgent(
+        [
+            [{"aircraft": "A1", "type": "assign_heading", "heading": 90}],
+            [{"aircraft": "A1", "type": "assign_heading", "heading": 0}],
+            [{"aircraft": "A1", "type": "assign_heading", "heading": 90}],
+        ]
+    )
+    result = run(world, agent, max_ticks=3, trace_path=tmp_path / "trace.jsonl")
+    metrics = result["metrics"]
+    assert metrics["conflict_introduced_count"] >= 2
+    assert metrics["conflict_reintroduced_count"] >= 1
+    assert metrics["secondary_conflicts_created_count"] == metrics["conflict_reintroduced_count"]
