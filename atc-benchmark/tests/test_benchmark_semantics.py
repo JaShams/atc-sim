@@ -48,6 +48,19 @@ def test_predicted_conflict_resolution_and_introduced_conflict(tmp_path):
     assert result["metrics"]["secondary_conflicts_created_count"] >= 0
 
 
+def test_conflict_lifecycle_transitions_across_ticks(tmp_path):
+    world = _world_for_predicted_conflict_tests()
+    agent = ScriptedAgent(
+        [
+            [{"aircraft": "A1", "type": "assign_heading", "heading": 90}],
+            [{"aircraft": "A1", "type": "assign_heading", "heading": 180}],
+        ]
+    )
+    result = run(world, agent, max_ticks=2, trace_path=tmp_path / "trace.jsonl")
+    assert result["metrics"]["conflict_resolved_count"] >= 1
+    assert result["metrics"]["secondary_conflicts_created_count"] >= 0
+
+
 def _world_for_predicted_conflict_tests() -> WorldState:
     return WorldState(
         time_sec=0,

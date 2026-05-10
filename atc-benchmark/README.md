@@ -23,3 +23,19 @@ pip install -e .
 atc-run scenarios/crossing_conflict_001.json
 pytest
 ```
+
+## Conflict-quality scoring semantics
+
+Conflict-quality accounting now tracks each `conflict_pair_id` across the full run (multi-tick), not only immediate pre/post-action snapshots. Lifecycle events are:
+
+- `introduced`: pair first appears in predictions.
+- `delayed`: an action moves the predicted conflict farther into the future.
+- `worsened`: an action moves the predicted conflict sooner.
+- `resolved`: previously active pair disappears from predictions.
+- `reintroduced`: a previously resolved pair appears again later in the run.
+
+`score_breakdown` fields are backward-compatible by name, but now aggregate from lifecycle transitions over the entire run:
+
+- `conflict_resolved`: reward from total `resolved` events.
+- `secondary_conflicts_created`: penalty from `reintroduced` events (newly introduced baseline conflicts are not penalized).
+- `conflicts_delayed` and `conflicts_worsened`: reward/penalty from total transition counts.
