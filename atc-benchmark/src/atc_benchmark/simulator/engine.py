@@ -25,6 +25,8 @@ def advance(world: WorldState) -> None:
             if ac.status == "rolling":
                 ac.status = "airborne_departure"
                 ac.takeoff_time_sec = world.time_sec + world.tick_sec
+        if ac.status == "airborne_departure" and (abs(ac.x_nm) > 30 or abs(ac.y_nm) > 30):
+            ac.status = "exited_airspace"
 
 
 def apply_actions(world: WorldState, actions: list[dict]) -> dict:
@@ -87,17 +89,18 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path) -> dict:
     min_h = float("inf")
     min_v = float("inf")
     conflict_resolved_count = 0
-    prior_predicted_ids: set[str] = set()
     conflict_predicted_times: list[int] = []
-    new_conflicts_created_by_action = 0
+    secondary_conflicts_created_count = 0
+    conflicts_delayed_count = 0
+    conflicts_worsened_count = 0
+    total_conflict_time_gained_sec = 0.0
+    conflict_time_gain_samples = 0
     go_around_count = 0
 
     with trace_path.open("w", encoding="utf-8") as f:
         for _ in range(max_ticks):
             triggered_events = apply_events(world)
             conflicts = detect_conflicts(world)
-            active_pairs = {c["id"] for c in conflicts}
-
             if conflicts:
                 loss_sep_count += len(conflicts)
                 min_h = min(min_h, min(c["horizontal_nm"] for c in conflicts))
@@ -119,12 +122,24 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path) -> dict:
                 instructions += len(actions)
                 valid, invalid = validate_actions(world, actions)
                 invalid_count += len(invalid)
-                before_predictions = {p["id"] for p in predictions}
+                before_by_pair = {p["conflict_pair_id"]: p for p in predictions}
                 effects = apply_actions(world, valid)
                 go_around_count += effects["go_around_count"]
-                after_predictions = {p["id"] for p in predict_conflicts(world)}
-                conflict_resolved_count += len(before_predictions - after_predictions)
-                new_conflicts_created_by_action += len(after_predictions - before_predictions)
+                after_predictions = predict_conflicts(world)
+                after_by_pair = {p["conflict_pair_id"]: p for p in after_predictions}
+
+                conflict_resolved_count += sum(1 for pair_id in before_by_pair if pair_id not in after_by_pair)
+                secondary_conflicts_created_count += sum(1 for pair_id in after_by_pair if pair_id not in before_by_pair)
+                for pair_id, before_conflict in before_by_pair.items():
+                    if pair_id not in after_by_pair:
+                        continue
+                    time_delta = after_by_pair[pair_id]["predicted_time_sec"] - before_conflict["predicted_time_sec"]
+                    total_conflict_time_gained_sec += time_delta
+                    conflict_time_gain_samples += 1
+                    if time_delta > 0:
+                        conflicts_delayed_count += 1
+                    elif time_delta < 0:
+                        conflicts_worsened_count += 1
 
             event = {
                 "time": world.time_sec,
@@ -148,9 +163,6 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path) -> dict:
 
     arrivals = [a for a in world.aircraft.values() if a.role == "arrival"]
     departures = [a for a in world.aircraft.values() if a.role == "departure"]
-    for a in departures:
-        if a.status in {"airborne_departure"} and (abs(a.x_nm) > 30 or abs(a.y_nm) > 30):
-            a.status = "exited_airspace"
     landings = sum(1 for a in arrivals if a.status == "landed")
     departures_ok = sum(1 for a in departures if a.status in {"airborne_departure", "exited_airspace", "landed"})
     arrival_delay = sum(max(0, (a.landing_time_sec or world.time_sec) - a.ideal_landing_time_sec) for a in arrivals if a.ideal_landing_time_sec is not None)
@@ -166,7 +178,12 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path) -> dict:
         "metrics": {
             "conflict_predicted_time": min(conflict_predicted_times) if conflict_predicted_times else None,
             "conflict_resolved_count": conflict_resolved_count,
-            "new_conflicts_created_by_action": new_conflicts_created_by_action,
+            "conflicts_delayed_count": conflicts_delayed_count,
+            "conflicts_worsened_count": conflicts_worsened_count,
+            "average_conflict_time_gained_sec": (
+                total_conflict_time_gained_sec / conflict_time_gain_samples if conflict_time_gain_samples else None
+            ),
+            "secondary_conflicts_created_count": secondary_conflicts_created_count,
             "go_around_count": go_around_count,
             "emergency_handled_count": emergency_handled_count,
         },
