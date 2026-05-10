@@ -3,34 +3,75 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ATC Trace Replay Viewer</title>
+  <title>ATC Replay Viewer</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
   <main>
-    <h1>ATC Benchmark Replay Viewer</h1>
-    <section class="panel controls">
-      <label>Trace JSONL <input id="traceFile" type="file" accept=".jsonl,.txt,application/json" /></label>
-      <label>Score JSON <input id="scoreFile" type="file" accept=".json,application/json" /></label>
-      <div id="loadStatus">Load a trace file to begin. Score file optional.</div>
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">ATC Benchmark</p>
+        <h1>Replay Viewer</h1>
+      </div>
+      <div id="loadStatus" class="status-pill" role="status">Load a trace file to begin. Score file optional.</div>
+    </header>
+
+    <section class="panel controls" aria-label="Load replay files">
+      <label class="file-picker">Trace JSONL <input id="traceFile" type="file" accept=".jsonl,.txt,application/json" /></label>
+      <label class="file-picker">Score JSON <input id="scoreFile" type="file" accept=".json,application/json" /></label>
     </section>
 
-    <section class="panel">
-      <canvas id="radar" width="900" height="560"></canvas>
-      <div class="timeline-row">
-        <button id="stepBack" type="button" disabled aria-label="Previous tick">&lt;</button>
-        <button id="playPause" type="button" disabled>Play</button>
-        <button id="stepForward" type="button" disabled aria-label="Next tick">&gt;</button>
-        <label for="tickSlider">Tick</label>
-        <input id="tickSlider" type="range" min="0" max="0" value="0" disabled />
-        <span id="tickLabel">0 / 0</span>
-        <label for="playSpeed">Speed</label>
-        <select id="playSpeed">
-          <option value="1000">1x</option>
-          <option value="500">2x</option>
-          <option value="250">4x</option>
-        </select>
+    <section class="summary-band" id="scenarioSummary" aria-label="Scenario summary">
+      <div>
+        <p class="eyebrow">Scenario</p>
+        <h2>No replay loaded</h2>
+        <p class="summary-copy">Choose a trace JSONL file to see a plain-language summary of the aircraft, runway, and main safety challenge.</p>
       </div>
+    </section>
+
+    <section class="replay-layout">
+      <article class="panel radar-panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Live Replay</p>
+            <h2>Radar View</h2>
+          </div>
+          <div class="radar-actions" aria-label="Radar view controls">
+            <span id="tickLabel" class="tick-readout">0 / 0</span>
+            <button id="zoomOut" class="icon-button" type="button" disabled aria-label="Zoom out" title="Zoom out">-</button>
+            <button id="zoomIn" class="icon-button" type="button" disabled aria-label="Zoom in" title="Zoom in">+</button>
+            <button id="resetView" type="button" disabled aria-label="Reset radar view" title="Reset radar view">Reset</button>
+          </div>
+        </div>
+        <div class="radar-wrap">
+          <canvas id="radar" width="900" height="560" aria-label="Radar replay canvas"></canvas>
+          <div id="radarTooltip" class="radar-tooltip" hidden></div>
+        </div>
+        <div id="radarLegend" class="radar-legend" aria-label="Radar legend"></div>
+        <div class="timeline-row" aria-label="Replay controls">
+          <button id="stepBack" class="icon-button" type="button" disabled aria-label="Previous tick" title="Previous tick">&#9664;</button>
+          <button id="playPause" type="button" disabled aria-label="Play replay" title="Play replay">Play</button>
+          <button id="stepForward" class="icon-button" type="button" disabled aria-label="Next tick" title="Next tick">&#9654;</button>
+          <label for="tickSlider">Time</label>
+          <input id="tickSlider" type="range" min="0" max="0" value="0" disabled />
+          <label for="playSpeed">Speed</label>
+          <select id="playSpeed" title="Replay speed">
+            <option value="1000">1x</option>
+            <option value="500">2x</option>
+            <option value="250">4x</option>
+          </select>
+        </div>
+      </article>
+
+      <aside class="panel inspector-panel" id="aircraftPanel" aria-label="Selected aircraft">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Inspect</p>
+            <h2>Aircraft</h2>
+          </div>
+        </div>
+        <p class="muted">Hover over an aircraft for a quick label, or click one to keep its details here.</p>
+      </aside>
     </section>
 
     <section class="grid">
@@ -39,11 +80,16 @@
     </section>
 
     <section class="panel" id="timelinePanel">
-      <h2>Tick Timeline</h2>
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">History</p>
+          <h2>Replay Events</h2>
+        </div>
+      </div>
       <div class="timeline-filters">
-        <label><input type="checkbox" id="filterHurt" /> Only hurt ticks</label>
-        <label><input type="checkbox" id="filterSafety" /> Only safety-triggered calls</label>
-        <label><input type="checkbox" id="filterLargeDelta" /> Only large deltas (|Δ| ≥ 0.05)</label>
+        <label title="Show only moments where the controller's action reduced the score."><input type="checkbox" id="filterHurt" /> Only hurt ticks</label>
+        <label title="Show calls caused by conflicts, runway risks, emergencies, or explicit events."><input type="checkbox" id="filterSafety" /> Only safety-triggered calls</label>
+        <label title="Show only moments where the normalized score changed by at least 0.05."><input type="checkbox" id="filterLargeDelta" /> Only large deltas (|&Delta;| &ge; 0.05)</label>
       </div>
       <div id="timelineList" class="timeline-list"></div>
     </section>
