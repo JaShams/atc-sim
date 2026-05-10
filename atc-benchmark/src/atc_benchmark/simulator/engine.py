@@ -13,6 +13,9 @@ from atc_benchmark.agents.base import extract_actions
 from .models import Aircraft, AirportState, RulesConfig, ScoringConfig, Weather, WorldState
 from .validator import validate_actions
 
+TAKEOFF_RUNWAY_OCCUPANCY_SEC = 35
+LANDING_RUNWAY_OCCUPANCY_SEC = 50
+
 
 def _runway_heading_deg(runway_id: str) -> float:
     n = int(runway_id)
@@ -45,6 +48,8 @@ def advance(world: WorldState) -> None:
                 ac.status = "landed"
                 ac.landing_time_sec = world.time_sec + world.tick_sec
                 world.airport.runway_occupied_by = ac.callsign
+                world.airport.runway_phase = "vacating"
+                world.airport.occupied_until_sec = world.time_sec + world.tick_sec + LANDING_RUNWAY_OCCUPANCY_SEC
             if ac.status == "rolling":
                 ac.status = "airborne_departure"
                 ac.takeoff_time_sec = world.time_sec + world.tick_sec
@@ -73,6 +78,8 @@ def apply_actions(world: WorldState, actions: list[dict]) -> dict:
             if ac.ready_time_sec is None:
                 ac.ready_time_sec = world.time_sec
             world.airport.runway_occupied_by = ac.callsign
+            world.airport.runway_phase = "takeoff_roll"
+            world.airport.occupied_until_sec = world.time_sec + TAKEOFF_RUNWAY_OCCUPANCY_SEC
             if ac.callsign in world.airport.departure_queue:
                 world.airport.departure_queue.remove(ac.callsign)
         elif t == "go_around":
@@ -122,6 +129,41 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
     latest_wind_change_sec: int | None = None
     wind_change_response_latency_sec: int | None = None
     unsafe_clearances_after_wind_change = 0
+    conflict_lifecycle_state: dict[str, dict] = {}
+
+    def _update_lifecycle(predictions: list[dict], *, is_action_phase: bool) -> None:
+        current_pairs = {p["conflict_pair_id"]: p for p in predictions}
+        active_pairs = {pair_id for pair_id, st in conflict_lifecycle_state.items() if st.get("active", False)}
+
+        for pair_id, prediction in current_pairs.items():
+            predicted_time = prediction["predicted_time_sec"]
+            state = conflict_lifecycle_state.get(pair_id)
+            if state is None:
+                conflict_lifecycle_state[pair_id] = {
+                    "first_predicted_time_sec": predicted_time,
+                    "last_predicted_time_sec": predicted_time,
+                    "active": True,
+                    "events": ["introduced"],
+                    "secondary_created_events": 1 if is_action_phase else 0,
+                }
+                continue
+
+            if not state["active"]:
+                state["active"] = True
+                state["events"].append("reintroduced")
+                if is_action_phase:
+                    state["secondary_created_events"] += 1
+            elif is_action_phase and predicted_time > state["last_predicted_time_sec"]:
+                state["events"].append("delayed")
+            elif is_action_phase and predicted_time < state["last_predicted_time_sec"]:
+                state["events"].append("worsened")
+            state["last_predicted_time_sec"] = predicted_time
+
+        resolved_pairs = active_pairs - set(current_pairs.keys())
+        for pair_id in resolved_pairs:
+            state = conflict_lifecycle_state[pair_id]
+            state["active"] = False
+            state["events"].append("resolved")
 
     with trace_path.open("w", encoding="utf-8") as f:
         for _ in range(max_ticks):
@@ -137,6 +179,7 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
                 min_v = min(min_v, min(c["vertical_ft"] for c in conflicts))
 
             predictions = predict_conflicts(world)
+            _update_lifecycle(predictions, is_action_phase=False)
             conflict_predicted_times.extend(p["in_seconds"] for p in predictions)
             dps = detect_decision_points(world)
             if triggered_events:
@@ -160,20 +203,7 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
                     unsafe_clearances_after_wind_change += sum(1 for a in valid if a["type"] in {"clear_to_land", "clear_for_takeoff"})
                 go_around_count += effects["go_around_count"]
                 after_predictions = predict_conflicts(world)
-                after_by_pair = {p["conflict_pair_id"]: p for p in after_predictions}
-
-                conflict_resolved_count += sum(1 for pair_id in before_by_pair if pair_id not in after_by_pair)
-                secondary_conflicts_created_count += sum(1 for pair_id in after_by_pair if pair_id not in before_by_pair)
-                for pair_id, before_conflict in before_by_pair.items():
-                    if pair_id not in after_by_pair:
-                        continue
-                    time_delta = after_by_pair[pair_id]["predicted_time_sec"] - before_conflict["predicted_time_sec"]
-                    total_conflict_time_gained_sec += time_delta
-                    conflict_time_gain_samples += 1
-                    if time_delta > 0:
-                        conflicts_delayed_count += 1
-                    elif time_delta < 0:
-                        conflicts_worsened_count += 1
+                _update_lifecycle(after_predictions, is_action_phase=True)
 
             if latest_wind_change_sec is not None and wind_change_response_latency_sec is None and _runway_is_wind_compliant(world):
                 wind_change_response_latency_sec = world.time_sec - latest_wind_change_sec
@@ -195,8 +225,19 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
                 break
             advance(world)
             world.time_sec += world.tick_sec
-            if world.airport.runway_occupied_by:
+            if world.airport.runway_occupied_by and world.airport.occupied_until_sec is not None and world.time_sec >= world.airport.occupied_until_sec:
                 world.airport.runway_occupied_by = None
+                world.airport.runway_phase = None
+                world.airport.occupied_until_sec = None
+
+    for state in conflict_lifecycle_state.values():
+        events = state["events"]
+        conflict_resolved_count += events.count("resolved")
+        secondary_conflicts_created_count += state["secondary_created_events"]
+        conflicts_delayed_count += events.count("delayed")
+        conflicts_worsened_count += events.count("worsened")
+        total_conflict_time_gained_sec += state["last_predicted_time_sec"] - state["first_predicted_time_sec"]
+        conflict_time_gain_samples += 1
 
     arrivals = [a for a in world.aircraft.values() if a.role == "arrival"]
     departures = [a for a in world.aircraft.values() if a.role == "departure"]
