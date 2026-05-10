@@ -88,6 +88,8 @@ def apply_actions(world: WorldState, actions: list[dict]) -> dict:
             go_arounds += 1
         elif t in {"hold_short", "hold_position"}:
             ac.speed_kt = 0
+        elif t == "no_op":
+            continue
     return {"go_around_count": go_arounds}
 
 

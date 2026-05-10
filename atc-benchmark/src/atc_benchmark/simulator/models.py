@@ -13,7 +13,6 @@ ALLOWED_ACTION_TYPES = {
     "go_around",
     "hold_short",
     "hold_position",
-    "continue_approach",
     "no_op",
 }
 

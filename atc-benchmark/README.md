@@ -24,6 +24,30 @@ atc-run scenarios/crossing_conflict_001.json
 pytest
 ```
 
+## Action schema (required fields)
+
+Each action must include:
+
+- `type`: one of the allowed action types below.
+- `aircraft`: callsign present in the current `world.aircraft` map.
+
+Additional required fields by `type`:
+
+- `assign_heading`: `heading` (integer/float in `[0, 359]`).
+- `assign_altitude`: `altitude_ft` (number, must satisfy rules minimum).
+- `assign_speed`: `speed_kt` (number, must satisfy rules min/max).
+- `clear_to_land`: no extra fields.
+- `clear_for_takeoff`: no extra fields.
+- `go_around`: no extra fields.
+- `hold_short`: no extra fields.
+- `hold_position`: no extra fields.
+- `no_op`: no extra fields.
+
+Validation notes:
+
+- Unknown action types are rejected with `invalid_action_type`.
+- Invalid/missing required numeric fields are rejected by type-specific validators (for example `invalid_heading`, `invalid_altitude`, `invalid_speed`).
+
 ## Conflict-quality scoring semantics
 
 Conflict-quality accounting now tracks each `conflict_pair_id` across the full run (multi-tick), not only immediate pre/post-action snapshots. Lifecycle events are:
