@@ -19,9 +19,9 @@ def _project_aircraft(ac, seconds: int) -> tuple[float, float, float]:
     return x, y, alt
 
 
-def _conflict_id(a_callsign: str, b_callsign: str, first_predicted_time_sec: int) -> str:
+def _conflict_pair_id(a_callsign: str, b_callsign: str) -> str:
     low, high = sorted((a_callsign, b_callsign))
-    return f"{low}|{high}|{first_predicted_time_sec}"
+    return f"{low}|{high}"
 
 
 def detect_conflicts(world: WorldState) -> list[dict]:
@@ -31,7 +31,18 @@ def detect_conflicts(world: WorldState) -> list[dict]:
         h = horizontal_distance_nm(a, b)
         v = abs(a.altitude_ft - b.altitude_ft)
         if h < world.rules.min_horizontal_nm and v < world.rules.min_vertical_ft:
-            conflicts.append({"type": "loss_of_separation", "id": _conflict_id(a.callsign, b.callsign, world.time_sec), "aircraft": [a.callsign, b.callsign], "horizontal_nm": h, "vertical_ft": v})
+            pair_id = _conflict_pair_id(a.callsign, b.callsign)
+            conflicts.append(
+                {
+                    "type": "loss_of_separation",
+                    "id": f"{pair_id}|{world.time_sec}",
+                    "conflict_pair_id": pair_id,
+                    "conflict_instance_id": f"{pair_id}|{world.time_sec}",
+                    "aircraft": [a.callsign, b.callsign],
+                    "horizontal_nm": h,
+                    "vertical_ft": v,
+                }
+            )
     return conflicts
 
 
@@ -58,7 +69,9 @@ def predict_conflicts(world: WorldState) -> list[dict]:
             predictions.append(
                 {
                     "type": "predicted_conflict",
-                    "id": _conflict_id(a.callsign, b.callsign, abs_time),
+                    "id": f"{_conflict_pair_id(a.callsign, b.callsign)}|{abs_time}",
+                    "conflict_pair_id": _conflict_pair_id(a.callsign, b.callsign),
+                    "conflict_instance_id": f"{_conflict_pair_id(a.callsign, b.callsign)}|{abs_time}",
                     "aircraft": [a.callsign, b.callsign],
                     "in_seconds": first_conflict_time,
                     "predicted_time_sec": abs_time,

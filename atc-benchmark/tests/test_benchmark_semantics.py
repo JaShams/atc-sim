@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from atc_benchmark.simulator.engine import apply_actions, load_world, run
+from atc_benchmark.simulator.models import Aircraft, AirportState, RulesConfig, Weather, WorldState
 from atc_benchmark.simulator.validator import validate_actions
 
 
@@ -44,7 +45,67 @@ def test_predicted_conflict_resolution_and_introduced_conflict(tmp_path):
     )
     result = run(world, agent, max_ticks=3, trace_path=tmp_path / "trace.jsonl")
     assert result["metrics"]["conflict_resolved_count"] >= 0
-    assert result["metrics"]["new_conflicts_created_by_action"] >= 0
+    assert result["metrics"]["secondary_conflicts_created_count"] >= 0
+
+
+def _world_for_predicted_conflict_tests() -> WorldState:
+    return WorldState(
+        time_sec=0,
+        tick_sec=5,
+        airport=AirportState(runway_id="27", active_runway="27"),
+        weather=Weather(),
+        rules=RulesConfig(lookahead_seconds=60, min_horizontal_nm=3.0, min_vertical_ft=1000.0),
+        aircraft={
+            "A1": Aircraft(callsign="A1", role="arrival", x_nm=0.0, y_nm=-5.0, altitude_ft=5000, speed_kt=240, heading_deg=0, status="airborne"),
+            "A2": Aircraft(callsign="A2", role="arrival", x_nm=0.0, y_nm=5.0, altitude_ft=5000, speed_kt=240, heading_deg=180, status="airborne"),
+            "A3": Aircraft(callsign="A3", role="arrival", x_nm=50.0, y_nm=50.0, altitude_ft=5000, speed_kt=240, heading_deg=90, status="airborne"),
+        },
+    )
+
+
+def test_action_fully_resolves_predicted_conflict(tmp_path):
+    world = _world_for_predicted_conflict_tests()
+    agent = ScriptedAgent([[{"aircraft": "A1", "type": "assign_heading", "heading": 90}]])
+    result = run(world, agent, max_ticks=1, trace_path=tmp_path / "trace.jsonl")
+    assert result["metrics"]["conflict_resolved_count"] == 1
+    assert result["metrics"]["conflicts_delayed_count"] == 0
+    assert result["metrics"]["conflicts_worsened_count"] == 0
+
+
+def test_action_delays_same_predicted_conflict(tmp_path):
+    world = _world_for_predicted_conflict_tests()
+    agent = ScriptedAgent([[{"aircraft": "A1", "type": "assign_speed", "speed_kt": 200}]])
+    result = run(world, agent, max_ticks=1, trace_path=tmp_path / "trace.jsonl")
+    assert result["metrics"]["conflict_resolved_count"] == 0
+    assert result["metrics"]["conflicts_delayed_count"] == 1
+    assert result["metrics"]["average_conflict_time_gained_sec"] > 0
+
+
+def test_action_worsens_same_predicted_conflict(tmp_path):
+    world = _world_for_predicted_conflict_tests()
+    agent = ScriptedAgent([[{"aircraft": "A1", "type": "assign_speed", "speed_kt": 280}]])
+    result = run(world, agent, max_ticks=1, trace_path=tmp_path / "trace.jsonl")
+    assert result["metrics"]["conflicts_worsened_count"] == 1
+    assert result["metrics"]["average_conflict_time_gained_sec"] < 0
+
+
+def test_action_creates_secondary_conflict_with_new_pair(tmp_path):
+    world = _world_for_predicted_conflict_tests()
+    world.aircraft["A3"].x_nm = 6.0
+    world.aircraft["A3"].y_nm = -5.0
+    world.aircraft["A3"].heading_deg = 270
+    agent = ScriptedAgent([[{"aircraft": "A1", "type": "assign_heading", "heading": 90}]])
+    result = run(world, agent, max_ticks=1, trace_path=tmp_path / "trace.jsonl")
+    assert result["metrics"]["secondary_conflicts_created_count"] == 1
+
+
+def test_exited_airspace_aircraft_ignored_by_conflict_detection(tmp_path):
+    world = _world_for_predicted_conflict_tests()
+    world.aircraft["A3"].status = "airborne_departure"
+    world.aircraft["A3"].x_nm = 40.0
+    world.aircraft["A3"].y_nm = 40.0
+    run(world, ScriptedAgent([]), max_ticks=1, trace_path=tmp_path / "trace.jsonl")
+    assert world.aircraft["A3"].status == "exited_airspace"
 
 
 def test_runway_protection_ignores_arrivals_flying_away():
