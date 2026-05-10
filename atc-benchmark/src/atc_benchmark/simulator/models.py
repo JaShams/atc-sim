@@ -64,6 +64,11 @@ class RulesConfig:
     max_speed_kt: float = 280.0
     lookahead_seconds: int = 60
     runway_arrival_protection_nm: float = 5.0
+    outcome_horizon_ticks: int = 3
+    outcome_immediate_epsilon: float = 0.01
+    outcome_window_epsilon: float = 0.02
+    outcome_normalization_floor: float = 1.0
+    debug_require_trigger_provenance: bool = False
 
 
 @dataclass

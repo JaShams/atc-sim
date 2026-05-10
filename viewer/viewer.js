@@ -5,6 +5,10 @@ const tickLabel = document.getElementById('tickLabel');
 const loadStatus = document.getElementById('loadStatus');
 const scorePanel = document.getElementById('scorePanel');
 const tickPanel = document.getElementById('tickPanel');
+const timelineList = document.getElementById('timelineList');
+const filterHurt = document.getElementById('filterHurt');
+const filterSafety = document.getElementById('filterSafety');
+const filterLargeDelta = document.getElementById('filterLargeDelta');
 const canvas = document.getElementById('radar');
 const ctx = canvas.getContext('2d');
 const playPause = document.getElementById('playPause');
@@ -48,6 +52,9 @@ playSpeed.addEventListener('change', () => {
     startPlayback();
   }
 });
+filterHurt.addEventListener('change', renderTimeline);
+filterSafety.addEventListener('change', renderTimeline);
+filterLargeDelta.addEventListener('change', renderTimeline);
 
 async function loadFiles() {
   if (!traceFileInput.files[0]) return;
@@ -69,6 +76,7 @@ async function loadFiles() {
       : `Loaded ${traceEvents.length} ticks. Score file optional.`;
     renderScore();
     renderAtTick(0);
+    renderTimeline();
   } catch (err) {
     loadStatus.textContent = `Failed to parse files: ${err.message}`;
   }
@@ -235,6 +243,134 @@ function renderTickDetails(e) {
   appendJsonBlock(tickPanel, 'Active Conflicts', e.conflicts);
   appendJsonBlock(tickPanel, 'Predicted Conflicts', e.predicted_conflicts);
   appendJsonBlock(tickPanel, 'Triggered Events', e.triggered_events);
+}
+
+function renderTimeline() {
+  clearNode(timelineList);
+  if (!traceEvents.length) {
+    appendText(timelineList, 'p', 'Load a trace file to see timeline entries.');
+    timelineList.lastChild.className = 'muted';
+    return;
+  }
+
+  const componentTotals = {};
+  let rendered = 0;
+  traceEvents.forEach((event, idx) => {
+    const explanation = event.tick_explanation || {};
+    const outcome = explanation.outcome?.kind || 'unknown';
+    const immediateDelta = Number(explanation.outcome?.immediate_delta || 0);
+    const isSafetyTriggered = isSafetyTriggeredCall(event, explanation);
+    if (filterHurt.checked && outcome !== 'hurt') return;
+    if (filterSafety.checked && !isSafetyTriggered) return;
+    if (filterLargeDelta.checked && Math.abs(immediateDelta) < 0.05) return;
+
+    timelineList.appendChild(renderTimelineRow(idx, event, explanation, componentTotals));
+    const deltas = explanation.score_delta_by_component || {};
+    for (const [component, delta] of Object.entries(deltas)) {
+      componentTotals[component] = Number(componentTotals[component] || 0) + Number(delta || 0);
+    }
+    rendered += 1;
+  });
+
+  if (!rendered) {
+    appendText(timelineList, 'p', 'No ticks match the selected filters.');
+    timelineList.lastChild.className = 'muted';
+  }
+}
+
+function renderTimelineRow(idx, event, explanation, componentTotals) {
+  const outcomeKind = explanation.outcome?.kind || 'unknown';
+  const callReason = explanation.call_reason?.type || 'none';
+  const action = summarizeAction(explanation.action_chosen || event.actions || []);
+  const immediateDelta = Number(explanation.outcome?.immediate_delta || 0);
+  const totalDelta = Number(explanation.score_after || 0) - Number(explanation.score_before || 0);
+  const details = document.createElement('details');
+  details.className = 'timeline-item';
+
+  const summary = document.createElement('summary');
+  summary.className = 'timeline-summary';
+  const left = document.createElement('span');
+  left.className = 'timeline-summary-left';
+  appendText(left, 'span', `#${idx + 1}`);
+  const badge = document.createElement('span');
+  badge.className = `outcome-badge outcome-${outcomeKind}`;
+  badge.textContent = outcomeKind;
+  left.appendChild(badge);
+  appendText(left, 'span', `Reason: ${callReason}`);
+  appendText(left, 'span', `Action: ${action}`);
+  const right = document.createElement('span');
+  right.className = 'timeline-summary-right';
+  right.textContent = `Delta ${formatNum(totalDelta)} (norm ${formatNum(immediateDelta)})`;
+  summary.append(left, right);
+
+  const body = document.createElement('div');
+  appendText(body, 'p', `Outcome label: ${outcomeKind}`);
+  body.appendChild(renderComponentTable(explanation, componentTotals));
+  const actions = document.createElement('div');
+  actions.className = 'timeline-actions';
+  const jump = document.createElement('button');
+  jump.className = 'jump-link';
+  jump.type = 'button';
+  jump.textContent = 'Jump to replay/state inspector';
+  jump.addEventListener('click', () => {
+    renderAtTick(idx);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+  actions.appendChild(jump);
+  body.appendChild(actions);
+  details.append(summary, body);
+  return details;
+}
+
+function renderComponentTable(explanation, componentTotals) {
+  const scoreBefore = Number(explanation.score_before || 0);
+  const scoreAfter = Number(explanation.score_after || 0);
+  const totalDelta = scoreAfter - scoreBefore;
+  const deltaByComponent = explanation.score_delta_by_component || {};
+  const nonZeroComponents = Object.entries(deltaByComponent).filter(([, delta]) => Number(delta) !== 0);
+  if (!nonZeroComponents.length) {
+    const p = document.createElement('p');
+    p.className = 'muted';
+    p.textContent = 'No component-level score changes on this tick.';
+    return p;
+  }
+
+  const table = document.createElement('table');
+  table.className = 'component-table';
+  const header = document.createElement('thead');
+  const headerRow = document.createElement('tr');
+  ['Component', 'Before', 'After', 'Delta', 'Contribution'].forEach((label) => appendText(headerRow, 'th', label));
+  header.appendChild(headerRow);
+  const body = document.createElement('tbody');
+  nonZeroComponents.forEach(([component, delta]) => {
+    const deltaNum = Number(delta || 0);
+    const before = Number(componentTotals[component] || 0);
+    const pct = totalDelta === 0 ? 0 : (deltaNum / totalDelta) * 100;
+    const row = document.createElement('tr');
+    [component, formatNum(before), formatNum(before + deltaNum), formatNum(deltaNum), `${formatNum(pct)}%`].forEach((value) => appendText(row, 'td', value));
+    body.appendChild(row);
+  });
+  table.append(header, body);
+  return table;
+}
+
+function isSafetyTriggeredCall(event, explanation) {
+  const reasonType = explanation.call_reason?.type;
+  if (reasonType === 'event') return true;
+  const points = event.decision_points || [];
+  return points.some((dp) => {
+    const type = String(dp.type || '').toLowerCase();
+    const severity = String(dp.severity || '').toLowerCase();
+    return severity === 'critical' || type.includes('conflict') || type.includes('runway') || type.includes('emergency');
+  });
+}
+
+function summarizeAction(actions) {
+  if (!Array.isArray(actions) || !actions.length) return 'no_op';
+  const first = actions[0] || {};
+  const type = first.type || 'unknown';
+  const target = first.aircraft ? `(${first.aircraft})` : '';
+  return `${type}${target}${actions.length > 1 ? ` +${actions.length - 1}` : ''}`;
 }
 
 function stepTick(delta) {

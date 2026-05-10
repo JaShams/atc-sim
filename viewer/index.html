@@ -37,6 +37,16 @@
       <article class="panel" id="scorePanel"></article>
       <article class="panel" id="tickPanel"></article>
     </section>
+
+    <section class="panel" id="timelinePanel">
+      <h2>Tick Timeline</h2>
+      <div class="timeline-filters">
+        <label><input type="checkbox" id="filterHurt" /> Only hurt ticks</label>
+        <label><input type="checkbox" id="filterSafety" /> Only safety-triggered calls</label>
+        <label><input type="checkbox" id="filterLargeDelta" /> Only large deltas (|Δ| ≥ 0.05)</label>
+      </div>
+      <div id="timelineList" class="timeline-list"></div>
+    </section>
   </main>
   <script src="./viewer.js"></script>
 </body>

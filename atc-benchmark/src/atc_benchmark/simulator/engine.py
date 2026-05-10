@@ -10,6 +10,16 @@ from atc_benchmark.paths import resolve_scenario_path
 
 from .conflict_detection import detect_conflicts, predict_conflicts
 from .decision_points import detect_decision_points
+from .explain import (
+    CallReason,
+    CallReasonType,
+    OutcomeKind,
+    RankedAlternative,
+    ScoreComponentId,
+    TickExplanation,
+    TickOutcome,
+    tick_explanation_to_dict,
+)
 from .models import Aircraft, AirportState, RulesConfig, ScoringConfig, Weather, WorldState
 from .scenario_validation import validate_scenario_document
 from .validator import validate_actions
@@ -86,6 +96,48 @@ class ConflictLifecycleTracker:
             return None
         total = sum(st["last_predicted_time_sec"] - st["first_predicted_time_sec"] for st in self.state.values())
         return total / len(self.state)
+
+
+def _build_trigger_context(
+    world: WorldState,
+    decision_points: list[dict],
+    triggered_events: list[dict],
+) -> dict:
+    snapshot = world.snapshot()
+    event_ids = [event.get("id") or f"{event.get('type', 'event')}@{event.get('time_sec', world.time_sec)}" for event in triggered_events]
+    dp_types = [dp.get("type", "unknown") for dp in decision_points]
+    return {
+        "provenance": {
+            "source": "simulator.engine.run",
+            "time_sec": world.time_sec,
+            "tick_sec": world.tick_sec,
+        },
+        "decision_point_types": dp_types,
+        "decision_point_count": len(decision_points),
+        "triggered_event_ids": event_ids,
+        "triggered_event_count": len(triggered_events),
+        "thresholds": {
+            "min_horizontal_nm": world.rules.min_horizontal_nm,
+            "min_vertical_ft": world.rules.min_vertical_ft,
+            "lookahead_seconds": world.rules.lookahead_seconds,
+            "runway_arrival_protection_nm": world.rules.runway_arrival_protection_nm,
+            "runway_wind_compliance_deg": 45.0,
+        },
+        "state_snapshot_keys": {
+            "top_level": sorted(snapshot.keys()),
+            "airport": sorted(snapshot.get("airport", {}).keys()),
+            "weather": sorted(snapshot.get("weather", {}).keys()),
+            "aircraft_callsigns": sorted(snapshot.get("aircraft", {}).keys()),
+        },
+    }
+
+
+def _validate_trigger_context(trigger_context: dict) -> bool:
+    provenance = trigger_context.get("provenance") if isinstance(trigger_context, dict) else None
+    if not isinstance(provenance, dict):
+        return False
+    required = {"source", "time_sec", "tick_sec"}
+    return required.issubset(provenance.keys())
 
 
 def advance(world: WorldState) -> None:
@@ -217,20 +269,20 @@ def _build_score_result(
     emergency_unhandled_count = sum(1 for a in arrivals if a.emergency and a.status != "landed")
     scoring = world.scoring
     score_breakdown = {
-        "base_score": scoring.base_score,
-        "loss_of_separation": loss_sep_count * scoring.loss_of_separation_penalty,
-        "invalid_command": invalid_count * scoring.invalid_command_penalty,
-        "secondary_conflicts_created": secondary_conflicts_created_count * scoring.secondary_conflicts_created_penalty,
-        "conflicts_worsened": conflicts_worsened_count * scoring.conflicts_worsened_penalty,
-        "conflicts_delayed": conflicts_delayed_count * scoring.conflicts_delayed_reward,
-        "conflict_resolved": conflict_resolved_count * scoring.conflict_resolved_reward,
-        "arrival_delay_sec": arrival_delay * scoring.arrival_delay_sec_penalty,
-        "departure_delay_sec": departure_delay * scoring.departure_delay_sec_penalty,
-        "successful_landing": landings * scoring.successful_landing_reward,
-        "successful_departure": departures_ok * scoring.successful_departure_reward,
-        "emergency_handled": emergency_handled_count * scoring.emergency_handled_reward,
-        "emergency_unhandled": emergency_unhandled_count * scoring.emergency_unhandled_penalty,
-        "emergency_priority_compliance": (
+        ScoreComponentId.BASE_SCORE: scoring.base_score,
+        ScoreComponentId.LOSS_OF_SEPARATION: loss_sep_count * scoring.loss_of_separation_penalty,
+        ScoreComponentId.INVALID_COMMAND: invalid_count * scoring.invalid_command_penalty,
+        ScoreComponentId.SECONDARY_CONFLICTS_CREATED: secondary_conflicts_created_count * scoring.secondary_conflicts_created_penalty,
+        ScoreComponentId.CONFLICTS_WORSENED: conflicts_worsened_count * scoring.conflicts_worsened_penalty,
+        ScoreComponentId.CONFLICTS_DELAYED: conflicts_delayed_count * scoring.conflicts_delayed_reward,
+        ScoreComponentId.CONFLICT_RESOLVED: conflict_resolved_count * scoring.conflict_resolved_reward,
+        ScoreComponentId.ARRIVAL_DELAY_SEC: arrival_delay * scoring.arrival_delay_sec_penalty,
+        ScoreComponentId.DEPARTURE_DELAY_SEC: departure_delay * scoring.departure_delay_sec_penalty,
+        ScoreComponentId.SUCCESSFUL_LANDING: landings * scoring.successful_landing_reward,
+        ScoreComponentId.SUCCESSFUL_DEPARTURE: departures_ok * scoring.successful_departure_reward,
+        ScoreComponentId.EMERGENCY_HANDLED: emergency_handled_count * scoring.emergency_handled_reward,
+        ScoreComponentId.EMERGENCY_UNHANDLED: emergency_unhandled_count * scoring.emergency_unhandled_penalty,
+        ScoreComponentId.EMERGENCY_PRIORITY_COMPLIANCE: (
             emergency_priority_compliant_count * scoring.emergency_priority_compliance_reward
             + emergency_priority_violation_count * scoring.emergency_priority_violation_penalty
         ),
@@ -277,6 +329,89 @@ def _build_score_result(
     return result
 
 
+def _build_tick_explanation(
+    *,
+    tick_id: int,
+    world: WorldState,
+    dps: list[dict],
+    triggered_events: list[dict],
+    trigger_context: dict,
+    actions: list[dict],
+    conflicts: list[dict],
+    invalid: list[dict],
+    cumulative_score_components: dict[str, float],
+) -> TickExplanation:
+    call_reason_type = CallReasonType.NONE
+    if any(dp.get("type") == "event" for dp in dps):
+        call_reason_type = CallReasonType.EVENT
+    elif dps:
+        call_reason_type = CallReasonType.DECISION_POINT
+
+    score_before = sum(cumulative_score_components.values())
+    delta_by_component = {
+        ScoreComponentId.LOSS_OF_SEPARATION: len(conflicts) * world.scoring.loss_of_separation_penalty if conflicts else 0.0,
+        ScoreComponentId.INVALID_COMMAND: len(invalid) * world.scoring.invalid_command_penalty if invalid else 0.0,
+    }
+    for component, delta in delta_by_component.items():
+        cumulative_score_components[component] += delta
+
+    score_after = sum(cumulative_score_components.values())
+    score_diff = score_after - score_before
+    normalization_value = max(abs(world.scoring.base_score), world.rules.outcome_normalization_floor)
+    normalized_immediate_delta = score_diff / normalization_value
+    return TickExplanation(
+        tick_id=tick_id,
+        sim_time=world.time_sec,
+        call_reason=CallReason(
+            type=call_reason_type.value,
+            details={
+                "decision_point_count": len(dps),
+                "triggered_event_count": len(triggered_events),
+            },
+        ),
+        trigger_context=trigger_context,
+        action_chosen=actions or [],
+        alternatives_considered=[RankedAlternative(rank=1, action={"type": "no_op"}, score=None)],
+        outcome=TickOutcome(
+            kind=OutcomeKind.UNKNOWN.value,
+            metric="normalized_tick_score_delta",
+            value=normalized_immediate_delta,
+            immediate_delta=normalized_immediate_delta,
+            normalization_value=normalization_value,
+            epsilon_immediate=world.rules.outcome_immediate_epsilon,
+            epsilon_window=world.rules.outcome_window_epsilon,
+            horizon_ticks=world.rules.outcome_horizon_ticks,
+        ),
+        score_before=score_before,
+        score_after=score_after,
+        score_delta_by_component=delta_by_component,
+    )
+
+
+def _finalize_tick_outcomes(world: WorldState, tick_records: list[dict]) -> None:
+    for idx, tick_record in enumerate(tick_records):
+        explanation = tick_record["tick_explanation_obj"]
+        horizon_idx = min(idx + world.rules.outcome_horizon_ticks, len(tick_records) - 1)
+        window_delta = tick_records[horizon_idx]["tick_explanation_obj"].score_after - explanation.score_before
+        normalization_value = explanation.outcome.normalization_value or 1.0
+        normalized_window_delta = window_delta / normalization_value
+        explanation.outcome.window_delta = normalized_window_delta
+
+        immediate = explanation.outcome.immediate_delta or 0.0
+        if abs(immediate) <= world.rules.outcome_immediate_epsilon and abs(normalized_window_delta) <= world.rules.outcome_window_epsilon:
+            explanation.outcome.kind = OutcomeKind.NEUTRAL.value
+        elif normalized_window_delta > world.rules.outcome_window_epsilon:
+            explanation.outcome.kind = OutcomeKind.HELPED.value
+        elif normalized_window_delta < -world.rules.outcome_window_epsilon:
+            explanation.outcome.kind = OutcomeKind.HURT.value
+        elif immediate > world.rules.outcome_immediate_epsilon:
+            explanation.outcome.kind = OutcomeKind.HELPED.value
+        elif immediate < -world.rules.outcome_immediate_epsilon:
+            explanation.outcome.kind = OutcomeKind.HURT.value
+        else:
+            explanation.outcome.kind = OutcomeKind.NEUTRAL.value
+
+
 def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: dict | None = None) -> dict:
     trace_path.parent.mkdir(parents=True, exist_ok=True)
     invalid_count = 0
@@ -295,78 +430,110 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
     active_conflicts_count_total = 0
     predicted_conflicts_count_total = 0
     lifecycle = ConflictLifecycleTracker()
+    cumulative_score_components = {
+        ScoreComponentId.BASE_SCORE: world.scoring.base_score,
+        ScoreComponentId.LOSS_OF_SEPARATION: 0.0,
+        ScoreComponentId.INVALID_COMMAND: 0.0,
+        ScoreComponentId.SECONDARY_CONFLICTS_CREATED: 0.0,
+        ScoreComponentId.CONFLICTS_WORSENED: 0.0,
+        ScoreComponentId.CONFLICTS_DELAYED: 0.0,
+        ScoreComponentId.CONFLICT_RESOLVED: 0.0,
+        ScoreComponentId.ARRIVAL_DELAY_SEC: 0.0,
+        ScoreComponentId.DEPARTURE_DELAY_SEC: 0.0,
+        ScoreComponentId.SUCCESSFUL_LANDING: 0.0,
+        ScoreComponentId.SUCCESSFUL_DEPARTURE: 0.0,
+        ScoreComponentId.EMERGENCY_HANDLED: 0.0,
+        ScoreComponentId.EMERGENCY_UNHANDLED: 0.0,
+        ScoreComponentId.EMERGENCY_PRIORITY_COMPLIANCE: 0.0,
+    }
+    tick_records: list[dict] = []
 
-    with trace_path.open("w", encoding="utf-8") as f:
-        for _ in range(max_ticks):
-            triggered_events = apply_events(world)
+    for tick_id in range(max_ticks):
+        triggered_events = apply_events(world)
+        for event in triggered_events:
+            if event.get("type") == "wind_change":
+                latest_wind_change_sec = world.time_sec
+                wind_response_latency_sec = None
+        conflicts = detect_conflicts(world)
+        if conflicts:
+            loss_sep_count += len(conflicts)
+            min_h = min(min_h, min(c["horizontal_nm"] for c in conflicts))
+            min_v = min(min_v, min(c["vertical_ft"] for c in conflicts))
+        active_conflicts_count_total += len(conflicts)
+
+        predictions = predict_conflicts(world)
+        lifecycle.update(predictions, is_action_phase=False)
+        conflict_predicted_times.extend(p["in_seconds"] for p in predictions)
+        predicted_conflicts_count_total += len(predictions)
+        dps = detect_decision_points(world)
+        if triggered_events:
             for event in triggered_events:
-                if event.get("type") == "wind_change":
-                    latest_wind_change_sec = world.time_sec
-                    wind_response_latency_sec = None
-            conflicts = detect_conflicts(world)
-            if conflicts:
-                loss_sep_count += len(conflicts)
-                min_h = min(min_h, min(c["horizontal_nm"] for c in conflicts))
-                min_v = min(min_v, min(c["vertical_ft"] for c in conflicts))
-            active_conflicts_count_total += len(conflicts)
+                dps.append({"type": "event", "event": event})
 
-            predictions = predict_conflicts(world)
-            lifecycle.update(predictions, is_action_phase=False)
-            conflict_predicted_times.extend(p["in_seconds"] for p in predictions)
-            predicted_conflicts_count_total += len(predictions)
-            dps = detect_decision_points(world)
-            if triggered_events:
-                for event in triggered_events:
-                    dps.append({"type": "event", "event": event})
+        actions: list[dict] = []
+        obs: dict | None = None
+        invalid: list[dict] = []
+        agent_exception: dict | None = None
+        trigger_context = _build_trigger_context(world, dps, triggered_events)
+        if world.rules.debug_require_trigger_provenance and not _validate_trigger_context(trigger_context):
+            raise ValueError("Missing trigger provenance for invocation in debug mode")
 
-            actions: list[dict] = []
-            obs: dict | None = None
-            invalid: list[dict] = []
-            agent_exception: dict | None = None
-            if dps:
-                obs = {"time_sec": world.time_sec, "decision_points": dps, "snapshot": world.snapshot()}
-                try:
-                    agent_output = agent.act(obs)
-                except Exception as exc:  # noqa: BLE001
-                    malformed = [{"action": None, "reason": "agent_exception", "exception_type": type(exc).__name__, "exception_message": str(exc)}]
-                    raw_actions: list[dict] = []
-                    agent_exception = {"type": type(exc).__name__, "message": str(exc)}
-                else:
-                    raw_actions, malformed = extract_actions(agent_output)
-                actions = raw_actions
-                instructions += len(actions)
-                emergency_active = any(
-                    ac.role == "arrival" and ac.emergency and ac.status != "landed" for ac in world.aircraft.values()
-                )
-                if emergency_active:
-                    emergency_callsigns = {
-                        ac.callsign for ac in world.aircraft.values() if ac.role == "arrival" and ac.emergency and ac.status != "landed"
-                    }
-                    for action in actions:
-                        if not isinstance(action, dict):
-                            continue
-                        if action.get("type") == "clear_for_takeoff":
+        if dps:
+            obs = {"time_sec": world.time_sec, "decision_points": dps, "snapshot": world.snapshot(), "trigger_context": trigger_context}
+            try:
+                agent_output = agent.act(obs)
+            except Exception as exc:  # noqa: BLE001
+                malformed = [{"action": None, "reason": "agent_exception", "exception_type": type(exc).__name__, "exception_message": str(exc)}]
+                raw_actions: list[dict] = []
+                agent_exception = {"type": type(exc).__name__, "message": str(exc)}
+            else:
+                raw_actions, malformed = extract_actions(agent_output)
+            actions = raw_actions
+            instructions += len(actions)
+            emergency_active = any(
+                ac.role == "arrival" and ac.emergency and ac.status != "landed" for ac in world.aircraft.values()
+            )
+            if emergency_active:
+                emergency_callsigns = {
+                    ac.callsign for ac in world.aircraft.values() if ac.role == "arrival" and ac.emergency and ac.status != "landed"
+                }
+                for action in actions:
+                    if not isinstance(action, dict):
+                        continue
+                    if action.get("type") == "clear_for_takeoff":
+                        emergency_priority_violation_count += 1
+                    elif action.get("type") == "clear_to_land":
+                        if action.get("aircraft") in emergency_callsigns:
+                            emergency_priority_compliant_count += 1
+                        else:
                             emergency_priority_violation_count += 1
-                        elif action.get("type") == "clear_to_land":
-                            if action.get("aircraft") in emergency_callsigns:
-                                emergency_priority_compliant_count += 1
-                            else:
-                                emergency_priority_violation_count += 1
-                valid, invalid = validate_actions(world, actions)
-                invalid = malformed + invalid
-                malformed_agent_outputs_count += len(malformed)
-                invalid_count += len(invalid)
-                effects = apply_actions(world, valid)
-                if latest_wind_change_sec is not None and not _runway_is_wind_compliant(world):
-                    unsafe_clearances_after_wind_change += sum(1 for a in valid if a["type"] in {"clear_to_land", "clear_for_takeoff"})
-                go_around_count += effects["go_around_count"]
-                after_predictions = predict_conflicts(world)
-                lifecycle.update(after_predictions, is_action_phase=True)
+            valid, invalid = validate_actions(world, actions)
+            invalid = malformed + invalid
+            malformed_agent_outputs_count += len(malformed)
+            invalid_count += len(invalid)
+            effects = apply_actions(world, valid)
+            if latest_wind_change_sec is not None and not _runway_is_wind_compliant(world):
+                unsafe_clearances_after_wind_change += sum(1 for a in valid if a["type"] in {"clear_to_land", "clear_for_takeoff"})
+            go_around_count += effects["go_around_count"]
+            after_predictions = predict_conflicts(world)
+            lifecycle.update(after_predictions, is_action_phase=True)
 
-            if latest_wind_change_sec is not None and wind_response_latency_sec is None and _runway_is_wind_compliant(world):
-                wind_response_latency_sec = world.time_sec - latest_wind_change_sec
+        if latest_wind_change_sec is not None and wind_response_latency_sec is None and _runway_is_wind_compliant(world):
+            wind_response_latency_sec = world.time_sec - latest_wind_change_sec
 
-            event = {
+        explanation = _build_tick_explanation(
+            tick_id=tick_id,
+            world=world,
+            dps=dps,
+            triggered_events=triggered_events,
+            trigger_context=trigger_context,
+            actions=actions,
+            conflicts=conflicts,
+            invalid=invalid,
+            cumulative_score_components=cumulative_score_components,
+        )
+        tick_records.append(
+            {
                 "time": world.time_sec,
                 "triggered_events": triggered_events,
                 "decision_points": dps,
@@ -377,17 +544,25 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
                 "conflicts": conflicts,
                 "predicted_conflicts": predictions,
                 "state": world.snapshot(),
+                "tick_explanation_obj": explanation,
             }
-            f.write(json.dumps(event) + "\n")
+        )
 
-            if world.airport.runway_occupied_by and all(a.status in {"landed", "exited_airspace"} for a in world.aircraft.values()):
-                break
-            advance(world)
-            world.time_sec += world.tick_sec
-            if world.airport.runway_occupied_until_sec is not None and world.time_sec >= world.airport.runway_occupied_until_sec:
-                world.airport.runway_occupied_by = None
-                world.airport.runway_phase = None
-                world.airport.runway_occupied_until_sec = None
+        if world.airport.runway_occupied_by and all(a.status in {"landed", "exited_airspace"} for a in world.aircraft.values()):
+            break
+        advance(world)
+        world.time_sec += world.tick_sec
+        if world.airport.runway_occupied_until_sec is not None and world.time_sec >= world.airport.runway_occupied_until_sec:
+            world.airport.runway_occupied_by = None
+            world.airport.runway_phase = None
+            world.airport.runway_occupied_until_sec = None
+
+    _finalize_tick_outcomes(world, tick_records)
+    with trace_path.open("w", encoding="utf-8") as f:
+        for tick_record in tick_records:
+            explanation = tick_record.pop("tick_explanation_obj")
+            event = {**tick_record, "tick_explanation": tick_explanation_to_dict(explanation)}
+            f.write(json.dumps(event) + "\n")
 
     return _build_score_result(
         world,

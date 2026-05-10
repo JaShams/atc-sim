@@ -163,3 +163,33 @@ def test_runway_occupied_goaround_behavior_with_timed_occupancy(tmp_path):
     result = run(world, ScriptedAgent([[{"aircraft": "ARR1", "type": "go_around"}]]), max_ticks=1, trace_path=tmp_path / "trace.jsonl")
     assert result["metrics"]["go_around_count"] == 1
     assert world.aircraft["ARR1"].status == "go_around"
+
+
+def test_trigger_context_is_passed_to_agent_observation(tmp_path):
+    captured = {}
+
+    class CapturingAgent:
+        def act(self, obs):
+            captured.update(obs)
+            return {"actions": []}
+
+    world = load_world(resolve_scenario_path("scenarios/crossing_conflict_001.json"))
+    run(world, CapturingAgent(), max_ticks=1, trace_path=tmp_path / "trace.jsonl")
+    assert "trigger_context" in captured
+    assert captured["trigger_context"]["provenance"]["source"] == "simulator.engine.run"
+
+
+def test_debug_mode_requires_trigger_provenance(tmp_path, monkeypatch):
+    world = load_world(resolve_scenario_path("scenarios/crossing_conflict_001.json"))
+    world.rules.debug_require_trigger_provenance = True
+
+    from atc_benchmark.simulator import engine
+
+    monkeypatch.setattr(engine, "_validate_trigger_context", lambda _ctx: False)
+
+    class NoopAgent:
+        def act(self, obs):
+            return {"actions": []}
+
+    with __import__("pytest").raises(ValueError, match="Missing trigger provenance"):
+        run(world, NoopAgent(), max_ticks=1, trace_path=tmp_path / "trace.jsonl")

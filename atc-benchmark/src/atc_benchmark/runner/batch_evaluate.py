@@ -14,14 +14,14 @@ from atc_benchmark.simulator.engine import load_world, run
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--scenarios-dir", default="scenarios")
-    parser.add_argument("--agent", choices=["heuristic", "noop", "random"], default="heuristic")
+    parser.add_argument("--agent", choices=["heuristic", "noop", "random", "llm"], default="heuristic")
     parser.add_argument("--agents", help="Comma-separated agents to compare, e.g. heuristic,noop,random")
     parser.add_argument("--output-dir", default="outputs/batch")
     parser.add_argument("--max-ticks", type=int, default=300)
     args = parser.parse_args()
 
     agent_names = [name.strip() for name in args.agents.split(",") if name.strip()] if args.agents else [args.agent]
-    invalid_agents = sorted(set(agent_names) - {"heuristic", "noop", "random"})
+    invalid_agents = sorted(set(agent_names) - {"heuristic", "noop", "random", "llm"})
     if invalid_agents:
         raise SystemExit(f"unknown agents: {', '.join(invalid_agents)}")
 

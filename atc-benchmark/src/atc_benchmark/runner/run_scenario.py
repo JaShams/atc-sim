@@ -25,12 +25,7 @@ def build_agent(name: str):
     if name == "random":
         return RandomValidActionAgent(seed=0)
     if name == "llm":
-        class StubLLMClient:
-            def complete(self, prompt: str) -> str:
-                _ = prompt
-                return '{"actions": []}'
-
-        return LLMAgent(client=StubLLMClient())
+        return LLMAgent.from_env()
     raise ValueError(f"unknown agent: {name}")
 
 
