@@ -1,6 +1,8 @@
+import json
 from pathlib import Path
 
 from atc_benchmark.agents.base import Agent
+from atc_benchmark.agents.noop_agent import NoOpAgent
 from atc_benchmark.paths import resolve_scenario_path, scenarios_dir
 from atc_benchmark.simulator.decision_points import detect_decision_points
 from atc_benchmark.simulator.engine import apply_events, load_world, run
@@ -80,3 +82,33 @@ def test_emergency_and_conflict_simultaneous_decision_points():
     assert events and events[0]["type"] == "emergency_declare"
     assert any(dp["type"] == "emergency" for dp in dps)
     assert any(dp["type"] in {"predicted_conflict", "active_conflict"} for dp in dps)
+
+
+def test_airport_layout_survives_load_snapshot_and_trace(tmp_path):
+    source = json.loads(resolve_scenario_path("scenarios/crossing_conflict_001.json").read_text())
+    layout = {
+        "runways": [{"id": "09", "ends": [{"x_nm": -2.5, "y_nm": 0.0}, {"x_nm": 2.5, "y_nm": 0.0}]}],
+        "taxiways": [{"id": "A", "points": [{"x_nm": -1.0, "y_nm": -0.4}, {"x_nm": 1.0, "y_nm": -0.4}]}],
+        "aprons": [
+            {
+                "id": "MAIN",
+                "polygon": [
+                    {"x_nm": -0.8, "y_nm": -0.9},
+                    {"x_nm": 0.8, "y_nm": -0.9},
+                    {"x_nm": 0.8, "y_nm": -0.5},
+                ],
+            }
+        ],
+        "stands": [{"id": "S1", "position": {"x_nm": -0.4, "y_nm": -0.7}}],
+    }
+    source["airport"]["layout"] = layout
+    scenario = tmp_path / "layout_scenario.json"
+    trace = tmp_path / "layout_trace.jsonl"
+    scenario.write_text(json.dumps(source))
+
+    world = load_world(scenario)
+    assert world.snapshot()["airport"]["layout"] == layout
+
+    run(world, NoOpAgent(), max_ticks=1, trace_path=trace)
+    first_tick = json.loads(trace.read_text().splitlines()[0])
+    assert first_tick["state"]["airport"]["layout"] == layout

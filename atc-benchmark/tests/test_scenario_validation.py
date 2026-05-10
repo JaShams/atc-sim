@@ -16,6 +16,38 @@ def test_valid_scenario_document_passes():
     validate_scenario_document(_valid_payload())
 
 
+def test_valid_airport_layout_passes():
+    payload = _valid_payload()
+    payload["airport"]["layout"] = {
+        "runways": [
+            {
+                "id": "09",
+                "ends": [{"x_nm": -2.5, "y_nm": 0.0}, {"x_nm": 2.5, "y_nm": 0.0}],
+                "width_nm": 0.08,
+            }
+        ],
+        "taxiways": [
+            {
+                "id": "A",
+                "points": [{"x_nm": -1.0, "y_nm": -0.4}, {"x_nm": 1.0, "y_nm": -0.4}],
+                "width_nm": 0.04,
+            }
+        ],
+        "aprons": [
+            {
+                "id": "MAIN",
+                "polygon": [
+                    {"x_nm": -0.8, "y_nm": -0.9},
+                    {"x_nm": 0.8, "y_nm": -0.9},
+                    {"x_nm": 0.8, "y_nm": -0.5},
+                ],
+            }
+        ],
+        "stands": [{"id": "S1", "position": {"x_nm": -0.4, "y_nm": -0.7}}],
+    }
+    validate_scenario_document(payload)
+
+
 @pytest.mark.parametrize(
     ("mutate", "message"),
     [
@@ -41,3 +73,35 @@ def test_load_world_validates_before_construction(tmp_path):
     scenario.write_text(json.dumps(payload))
     with pytest.raises(ScenarioValidationError):
         load_world(scenario)
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (lambda p: p["airport"]["layout"]["runways"][0]["ends"][0].update({"x_nm": "west"}), "x_nm"),
+        (lambda p: p["airport"]["layout"]["runways"][0]["ends"].append({"x_nm": 3.0, "y_nm": 0.0}), "exactly 2"),
+        (lambda p: p["airport"]["layout"]["taxiways"][0].update({"points": [{"x_nm": 0.0, "y_nm": 0.0}]}), "at least 2"),
+        (lambda p: p["airport"]["layout"]["aprons"][0].update({"polygon": [{"x_nm": 0.0, "y_nm": 0.0}, {"x_nm": 1.0, "y_nm": 0.0}]}), "at least 3"),
+    ],
+)
+def test_invalid_airport_layout_reports_errors(mutate, message):
+    payload = _valid_payload()
+    payload["airport"]["layout"] = {
+        "runways": [{"id": "09", "ends": [{"x_nm": -2.5, "y_nm": 0.0}, {"x_nm": 2.5, "y_nm": 0.0}]}],
+        "taxiways": [{"id": "A", "points": [{"x_nm": -1.0, "y_nm": -0.4}, {"x_nm": 1.0, "y_nm": -0.4}]}],
+        "aprons": [
+            {
+                "id": "MAIN",
+                "polygon": [
+                    {"x_nm": -0.8, "y_nm": -0.9},
+                    {"x_nm": 0.8, "y_nm": -0.9},
+                    {"x_nm": 0.8, "y_nm": -0.5},
+                ],
+            }
+        ],
+        "stands": [{"id": "S1", "position": {"x_nm": -0.4, "y_nm": -0.7}}],
+    }
+    mutate(payload)
+    with pytest.raises(ScenarioValidationError) as exc:
+        validate_scenario_document(payload)
+    assert message in str(exc.value)

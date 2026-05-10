@@ -6,7 +6,109 @@
     "runway_occupied_by": null,
     "departure_queue": [
       "DEP1"
-    ]
+    ],
+    "layout": {
+      "runways": [
+        {
+          "id": "09",
+          "ends": [
+            {
+              "x_nm": -2.6,
+              "y_nm": 0.0
+            },
+            {
+              "x_nm": 2.6,
+              "y_nm": 0.0
+            }
+          ],
+          "width_nm": 0.08
+        }
+      ],
+      "taxiways": [
+        {
+          "id": "A",
+          "points": [
+            {
+              "x_nm": -1.8,
+              "y_nm": -0.35
+            },
+            {
+              "x_nm": -0.4,
+              "y_nm": -0.35
+            },
+            {
+              "x_nm": 0.0,
+              "y_nm": -0.1
+            },
+            {
+              "x_nm": 1.4,
+              "y_nm": -0.1
+            }
+          ],
+          "width_nm": 0.04
+        },
+        {
+          "id": "B",
+          "points": [
+            {
+              "x_nm": 0.0,
+              "y_nm": -0.1
+            },
+            {
+              "x_nm": 0.0,
+              "y_nm": -0.8
+            }
+          ],
+          "width_nm": 0.04
+        }
+      ],
+      "aprons": [
+        {
+          "id": "MAIN",
+          "polygon": [
+            {
+              "x_nm": -0.9,
+              "y_nm": -1.15
+            },
+            {
+              "x_nm": 0.9,
+              "y_nm": -1.15
+            },
+            {
+              "x_nm": 0.9,
+              "y_nm": -0.72
+            },
+            {
+              "x_nm": -0.9,
+              "y_nm": -0.72
+            }
+          ]
+        }
+      ],
+      "stands": [
+        {
+          "id": "S1",
+          "position": {
+            "x_nm": -0.55,
+            "y_nm": -0.94
+          }
+        },
+        {
+          "id": "S2",
+          "position": {
+            "x_nm": 0.0,
+            "y_nm": -0.94
+          }
+        },
+        {
+          "id": "S3",
+          "position": {
+            "x_nm": 0.55,
+            "y_nm": -0.94
+          }
+        }
+      ]
+    }
   },
   "rules": {
     "min_horizontal_nm": 3.0,
@@ -39,8 +141,8 @@
     {
       "callsign": "DEP1",
       "role": "departure",
-      "x_nm": 0,
-      "y_nm": 0,
+      "x_nm": 0.0,
+      "y_nm": -0.28,
       "altitude_ft": 0,
       "speed_kt": 0,
       "heading_deg": 90,
