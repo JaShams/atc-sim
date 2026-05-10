@@ -57,6 +57,7 @@ class RulesConfig:
     min_speed_kt: float = 120.0
     max_speed_kt: float = 280.0
     lookahead_seconds: int = 60
+    runway_arrival_protection_nm: float = 5.0
 
 
 @dataclass
@@ -67,6 +68,7 @@ class WorldState:
     weather: Weather
     rules: RulesConfig
     aircraft: dict[str, Aircraft]
+    events: list[dict] = field(default_factory=list)
 
     def snapshot(self) -> dict[str, Any]:
         return {

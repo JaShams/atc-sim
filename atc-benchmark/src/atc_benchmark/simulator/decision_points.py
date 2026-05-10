@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-from .conflict_detection import detect_conflicts
+from .conflict_detection import detect_conflicts, predict_conflicts
 from .models import WorldState
 
 
 def detect_decision_points(world: WorldState) -> list[dict]:
     out: list[dict] = []
-    conflicts = detect_conflicts(world)
-    for c in conflicts:
-        out.append({"type": "predicted_conflict", **c})
+
+    for c in detect_conflicts(world):
+        out.append({"type": "active_conflict", **c})
+    for c in predict_conflicts(world):
+        out.append(c)
 
     for ac in world.aircraft.values():
         if ac.status == "waiting_departure":
