@@ -39,3 +39,13 @@ Conflict-quality accounting now tracks each `conflict_pair_id` across the full r
 - `conflict_resolved`: reward from total `resolved` events.
 - `secondary_conflicts_created`: penalty from `reintroduced` events (newly introduced baseline conflicts are not penalized).
 - `conflicts_delayed` and `conflicts_worsened`: reward/penalty from total transition counts.
+
+Exact transition semantics (per `conflict_pair_id`):
+
+- Baseline predictions captured before agent actions can only create `introduced`/`resolved` state, never `delayed`/`worsened`.
+- `delayed` and `worsened` are evaluated only during action-phase predictions (`predict_conflicts` immediately after valid actions):
+  - `delayed`: `predicted_time_sec` increased vs the pair's previous active predicted time.
+  - `worsened`: `predicted_time_sec` decreased vs the pair's previous active predicted time.
+- `resolved` occurs whenever an active pair is absent in a later prediction snapshot.
+- `reintroduced` occurs when a previously resolved pair appears again later.
+- Secondary conflict penalty is intentionally tied only to `reintroduced` transitions. Newly `introduced` conflicts are tracked as lifecycle metrics but are not penalized as secondary creations.

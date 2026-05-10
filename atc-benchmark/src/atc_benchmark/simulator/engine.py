@@ -120,6 +120,8 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
     min_h = float("inf")
     min_v = float("inf")
     conflict_resolved_count = 0
+    conflict_introduced_count = 0
+    conflict_reintroduced_count = 0
     conflict_predicted_times: list[int] = []
     secondary_conflicts_created_count = 0
     conflicts_delayed_count = 0
@@ -133,6 +135,13 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
     active_conflicts_count_total = 0
     predicted_conflicts_count_total = 0
     conflict_lifecycle_state: dict[str, dict] = {}
+    lifecycle_transition_counts = {
+        "introduced": 0,
+        "delayed": 0,
+        "worsened": 0,
+        "resolved": 0,
+        "reintroduced": 0,
+    }
 
     def _update_lifecycle(predictions: list[dict], *, is_action_phase: bool) -> None:
         current_pairs = {p["conflict_pair_id"]: p for p in predictions}
@@ -147,19 +156,20 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
                     "last_predicted_time_sec": predicted_time,
                     "active": True,
                     "events": ["introduced"],
-                    "secondary_created_events": 1 if is_action_phase else 0,
                 }
+                lifecycle_transition_counts["introduced"] += 1
                 continue
 
             if not state["active"]:
                 state["active"] = True
                 state["events"].append("reintroduced")
-                if is_action_phase:
-                    state["secondary_created_events"] += 1
+                lifecycle_transition_counts["reintroduced"] += 1
             elif is_action_phase and predicted_time > state["last_predicted_time_sec"]:
                 state["events"].append("delayed")
+                lifecycle_transition_counts["delayed"] += 1
             elif is_action_phase and predicted_time < state["last_predicted_time_sec"]:
                 state["events"].append("worsened")
+                lifecycle_transition_counts["worsened"] += 1
             state["last_predicted_time_sec"] = predicted_time
 
         resolved_pairs = active_pairs - set(current_pairs.keys())
@@ -167,6 +177,7 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
             state = conflict_lifecycle_state[pair_id]
             state["active"] = False
             state["events"].append("resolved")
+            lifecycle_transition_counts["resolved"] += 1
 
     with trace_path.open("w", encoding="utf-8") as f:
         for _ in range(max_ticks):
@@ -237,13 +248,15 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
                 world.airport.runway_occupied_until_sec = None
 
     for state in conflict_lifecycle_state.values():
-        events = state["events"]
-        conflict_resolved_count += events.count("resolved")
-        secondary_conflicts_created_count += state["secondary_created_events"]
-        conflicts_delayed_count += events.count("delayed")
-        conflicts_worsened_count += events.count("worsened")
         total_conflict_time_gained_sec += state["last_predicted_time_sec"] - state["first_predicted_time_sec"]
         conflict_time_gain_samples += 1
+
+    conflict_introduced_count = lifecycle_transition_counts["introduced"]
+    conflict_resolved_count = lifecycle_transition_counts["resolved"]
+    conflict_reintroduced_count = lifecycle_transition_counts["reintroduced"]
+    secondary_conflicts_created_count = conflict_reintroduced_count
+    conflicts_delayed_count = lifecycle_transition_counts["delayed"]
+    conflicts_worsened_count = lifecycle_transition_counts["worsened"]
 
     arrivals = [a for a in world.aircraft.values() if a.role == "arrival"]
     departures = [a for a in world.aircraft.values() if a.role == "departure"]
@@ -282,6 +295,8 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
         "metrics": {
             "conflict_predicted_time": min(conflict_predicted_times) if conflict_predicted_times else None,
             "conflict_resolved_count": conflict_resolved_count,
+            "conflict_introduced_count": conflict_introduced_count,
+            "conflict_reintroduced_count": conflict_reintroduced_count,
             "conflicts_delayed_count": conflicts_delayed_count,
             "conflicts_worsened_count": conflicts_worsened_count,
             "average_conflict_time_gained_sec": (
