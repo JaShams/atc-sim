@@ -14,6 +14,16 @@ from atc_benchmark import __version__
 from atc_benchmark.agents.base import extract_actions
 from .models import Aircraft, AirportState, RulesConfig, ScoringConfig, Weather, WorldState
 from .validator import validate_actions
+from .explain import (
+    CallReason,
+    CallReasonType,
+    OutcomeKind,
+    RankedAlternative,
+    ScoreComponentId,
+    TickExplanation,
+    TickOutcome,
+    tick_explanation_to_dict,
+)
 
 TAKEOFF_RUNWAY_OCCUPANCY_SEC = 35
 LANDING_RUNWAY_OCCUPANCY_SEC = 50
@@ -188,8 +198,25 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
             state["events"].append("resolved")
             lifecycle_transition_counts["resolved"] += 1
 
+    cumulative_score_components = {
+        ScoreComponentId.BASE_SCORE: world.scoring.base_score,
+        ScoreComponentId.LOSS_OF_SEPARATION: 0.0,
+        ScoreComponentId.INVALID_COMMAND: 0.0,
+        ScoreComponentId.SECONDARY_CONFLICTS_CREATED: 0.0,
+        ScoreComponentId.CONFLICTS_WORSENED: 0.0,
+        ScoreComponentId.CONFLICTS_DELAYED: 0.0,
+        ScoreComponentId.CONFLICT_RESOLVED: 0.0,
+        ScoreComponentId.ARRIVAL_DELAY_SEC: 0.0,
+        ScoreComponentId.DEPARTURE_DELAY_SEC: 0.0,
+        ScoreComponentId.SUCCESSFUL_LANDING: 0.0,
+        ScoreComponentId.SUCCESSFUL_DEPARTURE: 0.0,
+        ScoreComponentId.EMERGENCY_HANDLED: 0.0,
+        ScoreComponentId.EMERGENCY_UNHANDLED: 0.0,
+        ScoreComponentId.EMERGENCY_PRIORITY_COMPLIANCE: 0.0,
+    }
+
     with trace_path.open("w", encoding="utf-8") as f:
-        for _ in range(max_ticks):
+        for tick_id in range(max_ticks):
             triggered_events = apply_events(world)
             for event in triggered_events:
                 if event.get("type") == "wind_change":
@@ -248,7 +275,6 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
                 invalid = malformed + invalid
                 malformed_agent_outputs_count += len(malformed)
                 invalid_count += len(invalid)
-                before_by_pair = {p["conflict_pair_id"]: p for p in predictions}
                 effects = apply_actions(world, valid)
                 if latest_wind_change_sec is not None and not _runway_is_wind_compliant(world):
                     unsafe_clearances_after_wind_change += sum(1 for a in valid if a["type"] in {"clear_to_land", "clear_for_takeoff"})
@@ -258,6 +284,48 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
 
             if latest_wind_change_sec is not None and wind_response_latency_sec is None and _runway_is_wind_compliant(world):
                 wind_response_latency_sec = world.time_sec - latest_wind_change_sec
+
+            call_reason_type = CallReasonType.NONE
+            if any(dp.get("type") == "event" for dp in dps):
+                call_reason_type = CallReasonType.EVENT
+            elif dps:
+                call_reason_type = CallReasonType.DECISION_POINT
+
+            score_before = sum(cumulative_score_components.values())
+            if conflicts:
+                cumulative_score_components[ScoreComponentId.LOSS_OF_SEPARATION] += len(conflicts) * world.scoring.loss_of_separation_penalty
+            if invalid:
+                cumulative_score_components[ScoreComponentId.INVALID_COMMAND] += len(invalid) * world.scoring.invalid_command_penalty
+
+            delta_by_component = {
+                ScoreComponentId.LOSS_OF_SEPARATION: len(conflicts) * world.scoring.loss_of_separation_penalty if conflicts else 0.0,
+                ScoreComponentId.INVALID_COMMAND: len(invalid) * world.scoring.invalid_command_penalty if invalid else 0.0,
+            }
+            score_after = sum(cumulative_score_components.values())
+            score_diff = score_after - score_before
+            outcome_kind = OutcomeKind.NEUTRAL
+            if score_diff > 0:
+                outcome_kind = OutcomeKind.HELPED
+            elif score_diff < 0:
+                outcome_kind = OutcomeKind.HURT
+
+            explanation = TickExplanation(
+                tick_id=tick_id,
+                sim_time=world.time_sec,
+                call_reason=CallReason(
+                    type=call_reason_type.value,
+                    details={
+                        "decision_point_count": len(dps),
+                        "triggered_event_count": len(triggered_events),
+                    },
+                ),
+                action_chosen=actions or [],
+                alternatives_considered=[RankedAlternative(rank=1, action={"type": "no_op"}, score=None)],
+                outcome=TickOutcome(kind=outcome_kind.value, metric="tick_score_delta", value=score_diff),
+                score_before=score_before,
+                score_after=score_after,
+                score_delta_by_component=delta_by_component,
+            )
 
             event = {
                 "time": world.time_sec,
@@ -270,6 +338,7 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
                 "conflicts": conflicts,
                 "predicted_conflicts": predictions,
                 "state": world.snapshot(),
+                "tick_explanation": tick_explanation_to_dict(explanation),
             }
             f.write(json.dumps(event) + "\n")
 
@@ -302,20 +371,20 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
     emergency_unhandled_count = sum(1 for a in arrivals if a.emergency and a.status != "landed")
     scoring = world.scoring
     score_breakdown = {
-        "base_score": scoring.base_score,
-        "loss_of_separation": loss_sep_count * scoring.loss_of_separation_penalty,
-        "invalid_command": invalid_count * scoring.invalid_command_penalty,
-        "secondary_conflicts_created": secondary_conflicts_created_count * scoring.secondary_conflicts_created_penalty,
-        "conflicts_worsened": conflicts_worsened_count * scoring.conflicts_worsened_penalty,
-        "conflicts_delayed": conflicts_delayed_count * scoring.conflicts_delayed_reward,
-        "conflict_resolved": conflict_resolved_count * scoring.conflict_resolved_reward,
-        "arrival_delay_sec": arrival_delay * scoring.arrival_delay_sec_penalty,
-        "departure_delay_sec": departure_delay * scoring.departure_delay_sec_penalty,
-        "successful_landing": landings * scoring.successful_landing_reward,
-        "successful_departure": departures_ok * scoring.successful_departure_reward,
-        "emergency_handled": emergency_handled_count * scoring.emergency_handled_reward,
-        "emergency_unhandled": emergency_unhandled_count * scoring.emergency_unhandled_penalty,
-        "emergency_priority_compliance": (
+        ScoreComponentId.BASE_SCORE: scoring.base_score,
+        ScoreComponentId.LOSS_OF_SEPARATION: loss_sep_count * scoring.loss_of_separation_penalty,
+        ScoreComponentId.INVALID_COMMAND: invalid_count * scoring.invalid_command_penalty,
+        ScoreComponentId.SECONDARY_CONFLICTS_CREATED: secondary_conflicts_created_count * scoring.secondary_conflicts_created_penalty,
+        ScoreComponentId.CONFLICTS_WORSENED: conflicts_worsened_count * scoring.conflicts_worsened_penalty,
+        ScoreComponentId.CONFLICTS_DELAYED: conflicts_delayed_count * scoring.conflicts_delayed_reward,
+        ScoreComponentId.CONFLICT_RESOLVED: conflict_resolved_count * scoring.conflict_resolved_reward,
+        ScoreComponentId.ARRIVAL_DELAY_SEC: arrival_delay * scoring.arrival_delay_sec_penalty,
+        ScoreComponentId.DEPARTURE_DELAY_SEC: departure_delay * scoring.departure_delay_sec_penalty,
+        ScoreComponentId.SUCCESSFUL_LANDING: landings * scoring.successful_landing_reward,
+        ScoreComponentId.SUCCESSFUL_DEPARTURE: departures_ok * scoring.successful_departure_reward,
+        ScoreComponentId.EMERGENCY_HANDLED: emergency_handled_count * scoring.emergency_handled_reward,
+        ScoreComponentId.EMERGENCY_UNHANDLED: emergency_unhandled_count * scoring.emergency_unhandled_penalty,
+        ScoreComponentId.EMERGENCY_PRIORITY_COMPLIANCE: (
             emergency_priority_compliant_count * scoring.emergency_priority_compliance_reward
             + emergency_priority_violation_count * scoring.emergency_priority_violation_penalty
         ),
