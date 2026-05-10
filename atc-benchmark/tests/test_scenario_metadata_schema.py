@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from atc_benchmark.paths import resolve_scenario_path, scenarios_dir
+
 
 REQUIRED_TOP_LEVEL_KEYS = {"tags", "difficulty_tier", "intended_stressors", "expected_baseline_ranges"}
 ALLOWED_TAGS = {"safety", "efficiency", "event"}
@@ -7,7 +9,7 @@ ALLOWED_TIERS = {"intro", "intermediate", "advanced", "expert"}
 
 
 def test_scenario_metadata_is_complete():
-    scenario_dir = Path("scenarios")
+    scenario_dir = scenarios_dir()
     for scenario_file in sorted(scenario_dir.glob("*.json")):
         payload = __import__("json").loads(scenario_file.read_text())
         assert "scenario_metadata" in payload, f"missing scenario_metadata in {scenario_file.name}"

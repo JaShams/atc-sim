@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from atc_benchmark.paths import resolve_scenario_path, scenarios_dir
+
 from atc_benchmark.agents.heuristic_agent import HeuristicAgent
 from atc_benchmark.simulator.engine import load_world, run
 from atc_benchmark.simulator.models import Aircraft, AirportState, RulesConfig, Weather, WorldState
@@ -27,7 +29,7 @@ class EmergencyLandingAgent:
 
 
 def test_run_returns_score(tmp_path):
-    world = load_world(Path("scenarios/crossing_conflict_001.json"))
+    world = load_world(resolve_scenario_path("scenarios/crossing_conflict_001.json"))
     result = run(world, HeuristicAgent(), max_ticks=5, trace_path=tmp_path / "trace.jsonl")
     assert "score" in result
     assert "metrics" in result
@@ -72,7 +74,7 @@ def test_resolving_conflict_improves_score(tmp_path):
 
 
 def test_delay_reduces_score(tmp_path):
-    world = load_world(Path("scenarios/crossing_conflict_001.json"))
+    world = load_world(resolve_scenario_path("scenarios/crossing_conflict_001.json"))
     world.aircraft["ARR1"].ideal_landing_time_sec = 0
     world.aircraft["DEP1"].ideal_takeoff_time_sec = 0
     result = run(world, ScriptedAgent([]), max_ticks=2, trace_path=tmp_path / "trace.jsonl")
@@ -81,7 +83,7 @@ def test_delay_reduces_score(tmp_path):
 
 
 def test_emergency_handling_affects_score(tmp_path):
-    handled_world = load_world(Path("scenarios/emergency_priority_landing_001.json"))
+    handled_world = load_world(resolve_scenario_path("scenarios/emergency_priority_landing_001.json"))
     handled_world.aircraft["ARR_EMG"].emergency = True
     handled_world.aircraft["ARR_EMG"].status = "on_final"
     handled_world.aircraft["ARR_EMG"].x_nm = 0.0
@@ -89,7 +91,7 @@ def test_emergency_handling_affects_score(tmp_path):
     handled_world.aircraft["ARR_EMG"].altitude_ft = 200
     handled = run(handled_world, EmergencyLandingAgent(), max_ticks=2, trace_path=tmp_path / "handled_trace.jsonl")
 
-    unhandled_world = load_world(Path("scenarios/emergency_priority_landing_001.json"))
+    unhandled_world = load_world(resolve_scenario_path("scenarios/emergency_priority_landing_001.json"))
     unhandled_world.aircraft["ARR_EMG"].emergency = True
     unhandled = run(unhandled_world, ScriptedAgent([]), max_ticks=2, trace_path=tmp_path / "unhandled_trace.jsonl")
 

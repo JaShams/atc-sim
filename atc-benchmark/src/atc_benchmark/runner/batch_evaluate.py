@@ -6,6 +6,7 @@ import json
 from collections import Counter
 from pathlib import Path
 
+from atc_benchmark.paths import resolve_scenario_path, scenarios_dir
 from atc_benchmark.runner.run_scenario import build_agent, build_manifest
 from atc_benchmark.simulator.engine import load_world, run
 
@@ -18,7 +19,8 @@ def main() -> None:
     parser.add_argument("--max-ticks", type=int, default=300)
     args = parser.parse_args()
 
-    scenarios = sorted(Path(args.scenarios_dir).glob("*.json"))
+    scenarios_root = resolve_scenario_path(Path(args.scenarios_dir)) if args.scenarios_dir != "scenarios" else scenarios_dir()
+    scenarios = sorted(scenarios_root.glob("*.json"))
     out = Path(args.output_dir)
     score_dir = out / "scores"
     trace_dir = out / "traces"

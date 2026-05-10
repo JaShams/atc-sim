@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from atc_benchmark import __version__
+from atc_benchmark.paths import resolve_scenario_path
 from atc_benchmark.agents.heuristic_agent import HeuristicAgent
 from atc_benchmark.agents.noop_agent import NoOpAgent
 from atc_benchmark.agents.random_valid_action_agent import RandomValidActionAgent
@@ -45,7 +46,7 @@ def main() -> None:
     parser.add_argument("--max-ticks", type=int, default=300)
     args = parser.parse_args()
 
-    scenario = Path(args.scenario)
+    scenario = resolve_scenario_path(Path(args.scenario))
     world = load_world(scenario)
     manifest = build_manifest(scenario, world, args.agent, args.max_ticks)
     result = run(world, build_agent(args.agent), args.max_ticks, Path(args.trace), manifest=manifest)
