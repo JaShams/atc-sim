@@ -46,6 +46,7 @@ class AirportState:
     runway_phase: str | None = None
     runway_occupied_until_sec: int | None = None
     departure_queue: list[str] = field(default_factory=list)
+    layout: dict[str, Any] | None = None
 
 
 @dataclass
@@ -102,16 +103,19 @@ class WorldState:
     events: list[dict] = field(default_factory=list)
 
     def snapshot(self) -> dict[str, Any]:
+        airport = {
+            "runway_id": self.airport.runway_id,
+            "active_runway": self.airport.active_runway,
+            "runway_occupied_by": self.airport.runway_occupied_by,
+            "runway_phase": self.airport.runway_phase,
+            "runway_occupied_until_sec": self.airport.runway_occupied_until_sec,
+            "departure_queue": list(self.airport.departure_queue),
+        }
+        if self.airport.layout is not None:
+            airport["layout"] = self.airport.layout
         return {
             "time_sec": self.time_sec,
-            "airport": {
-                "runway_id": self.airport.runway_id,
-                "active_runway": self.airport.active_runway,
-                "runway_occupied_by": self.airport.runway_occupied_by,
-                "runway_phase": self.airport.runway_phase,
-                "runway_occupied_until_sec": self.airport.runway_occupied_until_sec,
-                "departure_queue": list(self.airport.departure_queue),
-            },
+            "airport": airport,
             "weather": self.weather.__dict__.copy(),
             "aircraft": {k: v.__dict__.copy() for k, v in self.aircraft.items()},
         }

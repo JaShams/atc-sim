@@ -101,6 +101,97 @@ def _validate_airport(airport: Any, errors: list[str]) -> None:
             errors.append("airport.departure_queue must be a list of callsign strings")
     if airport.get("runway_occupied_until_sec") is not None and not _is_non_negative_number(airport.get("runway_occupied_until_sec")):
         errors.append("airport.runway_occupied_until_sec must be null or non-negative")
+    if "layout" in airport:
+        _validate_airport_layout(airport["layout"], errors)
+
+
+def _validate_id(value: Any, label: str, errors: list[str]) -> None:
+    if not isinstance(value, str) or not value.strip():
+        errors.append(f"{label}.id must be a non-empty string")
+
+
+def _validate_point(point: Any, label: str, errors: list[str]) -> None:
+    if not isinstance(point, Mapping):
+        errors.append(f"{label} must be an object")
+        return
+    for field in ("x_nm", "y_nm"):
+        if field not in point:
+            errors.append(f"{label} missing required field '{field}'")
+        elif not _is_number(point[field]):
+            errors.append(f"{label}.{field} must be numeric")
+
+
+def _validate_point_list(points: Any, label: str, minimum: int, errors: list[str], *, exact: bool = False) -> None:
+    if not isinstance(points, list):
+        errors.append(f"{label} must be a list")
+        return
+    if exact and len(points) != minimum:
+        errors.append(f"{label} must contain exactly {minimum} points")
+    elif not exact and len(points) < minimum:
+        errors.append(f"{label} must contain at least {minimum} points")
+    for idx, point in enumerate(points):
+        _validate_point(point, f"{label}[{idx}]", errors)
+
+
+def _validate_optional_width(surface: Mapping[str, Any], label: str, errors: list[str]) -> None:
+    if "width_nm" in surface and not _is_non_negative_number(surface["width_nm"]):
+        errors.append(f"{label}.width_nm must be non-negative")
+
+
+def _validate_airport_layout(layout: Any, errors: list[str]) -> None:
+    if not isinstance(layout, Mapping):
+        errors.append("airport.layout must be an object")
+        return
+
+    runways = layout.get("runways", [])
+    if not isinstance(runways, list):
+        errors.append("airport.layout.runways must be a list when present")
+    else:
+        for idx, runway in enumerate(runways):
+            label = f"airport.layout.runways[{idx}]"
+            if not isinstance(runway, Mapping):
+                errors.append(f"{label} must be an object")
+                continue
+            _validate_id(runway.get("id"), label, errors)
+            _validate_point_list(runway.get("ends"), f"{label}.ends", 2, errors, exact=True)
+            _validate_optional_width(runway, label, errors)
+
+    taxiways = layout.get("taxiways", [])
+    if not isinstance(taxiways, list):
+        errors.append("airport.layout.taxiways must be a list when present")
+    else:
+        for idx, taxiway in enumerate(taxiways):
+            label = f"airport.layout.taxiways[{idx}]"
+            if not isinstance(taxiway, Mapping):
+                errors.append(f"{label} must be an object")
+                continue
+            _validate_id(taxiway.get("id"), label, errors)
+            _validate_point_list(taxiway.get("points"), f"{label}.points", 2, errors)
+            _validate_optional_width(taxiway, label, errors)
+
+    aprons = layout.get("aprons", [])
+    if not isinstance(aprons, list):
+        errors.append("airport.layout.aprons must be a list when present")
+    else:
+        for idx, apron in enumerate(aprons):
+            label = f"airport.layout.aprons[{idx}]"
+            if not isinstance(apron, Mapping):
+                errors.append(f"{label} must be an object")
+                continue
+            _validate_id(apron.get("id"), label, errors)
+            _validate_point_list(apron.get("polygon"), f"{label}.polygon", 3, errors)
+
+    stands = layout.get("stands", [])
+    if not isinstance(stands, list):
+        errors.append("airport.layout.stands must be a list when present")
+    else:
+        for idx, stand in enumerate(stands):
+            label = f"airport.layout.stands[{idx}]"
+            if not isinstance(stand, Mapping):
+                errors.append(f"{label} must be an object")
+                continue
+            _validate_id(stand.get("id"), label, errors)
+            _validate_point(stand.get("position"), f"{label}.position", errors)
 
 
 def _validate_aircraft(aircraft: Any, errors: list[str]) -> set[str]:

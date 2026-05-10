@@ -166,10 +166,18 @@ async function parseJsonl(file) {
 
 function calculateBounds(events) {
   const aircraft = events.flatMap((event) => Object.values(event.state?.aircraft || {}));
-  const runwayPoints = events.flatMap((event) => runwayWorldPoints(event.state?.airport?.active_runway || event.state?.airport?.runway_id));
-  if (!aircraft.length && !runwayPoints.length) return { minX: -10, maxX: 10, minY: -10, maxY: 10 };
-  const xs = [...aircraft.map((a) => a.x_nm), ...runwayPoints.map((point) => point.x_nm)];
-  const ys = [...aircraft.map((a) => a.y_nm), ...runwayPoints.map((point) => point.y_nm)];
+  const surfacePoints = events.flatMap((event) => {
+    const airport = event.state?.airport || {};
+    const runway = airport.active_runway || airport.runway_id;
+    const points = layoutWorldPoints(airport.layout);
+    if (!findLayoutRunway(airport.layout, runway)) {
+      points.push(...runwayWorldPoints(runway));
+    }
+    return points;
+  });
+  if (!aircraft.length && !surfacePoints.length) return { minX: -10, maxX: 10, minY: -10, maxY: 10 };
+  const xs = [...aircraft.map((a) => a.x_nm), ...surfacePoints.map((point) => point.x_nm)];
+  const ys = [...aircraft.map((a) => a.y_nm), ...surfacePoints.map((point) => point.y_nm)];
   const minX = Math.min(...xs);
   const maxX = Math.max(...xs);
   const minY = Math.min(...ys);
@@ -309,7 +317,10 @@ function drawRadar(state, aircraft, conflictSet, predictedSet, conflicts, predic
   ctx.fillStyle = palette.text;
   ctx.font = '600 14px Arial';
   ctx.fillText(`Runway ${runway}`, 18, 26);
-  drawRunway(runway);
+  const activeRunwayDrawn = drawAirportLayout(state.airport?.layout, runway);
+  if (!activeRunwayDrawn) {
+    drawRunway(runway);
+  }
 
   const byCallsign = Object.fromEntries(aircraft.map((ac) => [ac.callsign, ac]));
   drawConflictLinks(predictedConflicts, byCallsign, palette.predicted, [6, 5]);
@@ -380,25 +391,115 @@ function drawRadarGrid() {
   }
 }
 
-function drawRunway(runwayId) {
+function drawAirportLayout(layout, activeRunwayId) {
+  if (!layout || typeof layout !== 'object') return false;
+  const runways = Array.isArray(layout.runways) ? layout.runways : [];
+  const taxiways = Array.isArray(layout.taxiways) ? layout.taxiways : [];
+  const aprons = Array.isArray(layout.aprons) ? layout.aprons : [];
+  const stands = Array.isArray(layout.stands) ? layout.stands : [];
+
+  aprons.forEach(drawApron);
+  taxiways.forEach(drawTaxiway);
+  runways.forEach((runway) => drawLayoutRunway(runway, runway.id === activeRunwayId));
+  stands.forEach(drawStand);
+
+  return Boolean(findLayoutRunway(layout, activeRunwayId));
+}
+
+function drawApron(apron) {
+  const polygon = validPointList(apron?.polygon, 3);
+  if (!polygon) return;
+  ctx.fillStyle = 'rgba(71, 85, 105, 0.28)';
+  ctx.strokeStyle = 'rgba(148, 163, 184, 0.28)';
+  ctx.lineWidth = 1;
+  drawProjectedPath(polygon, true);
+  if (apron.id) drawSurfaceLabel(apron.id, polygon[0], 'rgba(203, 213, 225, 0.72)');
+}
+
+function drawTaxiway(taxiway) {
+  const points = validPointList(taxiway?.points, 2);
+  if (!points) return;
   const view = getViewBounds();
-  const heading = runwayHeading(runwayId);
-  const angle = ((heading - 90) * Math.PI) / 180;
-  const points = runwayWorldPoints(runwayId);
+  const scale = Math.min((canvas.width - 88) / (view.maxX - view.minX), (canvas.height - 88) / (view.maxY - view.minY));
+  ctx.strokeStyle = 'rgba(125, 211, 252, 0.38)';
+  ctx.lineWidth = Math.max(2, Math.min(8, Number(taxiway.width_nm || 0.03) * scale));
+  ctx.lineCap = 'round';
+  drawProjectedPath(points, false);
+  ctx.lineCap = 'butt';
+}
+
+function drawLayoutRunway(runway, isActive) {
+  const ends = validPointList(runway?.ends, 2, true);
+  if (!ends) return;
+  drawRunway(runway.id || 'RWY', ends, runway.width_nm, isActive);
+}
+
+function drawStand(stand) {
+  if (!isWorldPoint(stand?.position)) return;
+  const view = getViewBounds();
+  const x = project(stand.position.x_nm, view.minX, view.maxX, 44, canvas.width - 44);
+  const y = project(stand.position.y_nm, view.minY, view.maxY, canvas.height - 44, 44);
+  ctx.fillStyle = 'rgba(226, 232, 240, 0.7)';
+  ctx.strokeStyle = 'rgba(15, 23, 42, 0.8)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(x, y, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  if (stand.id) {
+    ctx.fillStyle = 'rgba(203, 213, 225, 0.78)';
+    ctx.font = '10px Arial';
+    ctx.fillText(stand.id, x + 7, y + 4);
+  }
+}
+
+function drawProjectedPath(points, closePath) {
+  const view = getViewBounds();
+  ctx.beginPath();
+  points.forEach((point, idx) => {
+    const x = project(point.x_nm, view.minX, view.maxX, 44, canvas.width - 44);
+    const y = project(point.y_nm, view.minY, view.maxY, canvas.height - 44, 44);
+    if (idx === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  if (closePath) {
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.stroke();
+}
+
+function drawSurfaceLabel(label, point, color) {
+  const view = getViewBounds();
+  const x = project(point.x_nm, view.minX, view.maxX, 44, canvas.width - 44);
+  const y = project(point.y_nm, view.minY, view.maxY, canvas.height - 44, 44);
+  ctx.fillStyle = color;
+  ctx.font = '10px Arial';
+  ctx.fillText(label, x + 6, y - 6);
+}
+
+function drawRunway(runwayId, points = runwayWorldPoints(runwayId), widthNm = null, isActive = true) {
+  if (!Array.isArray(points) || points.length < 2) return;
+  const view = getViewBounds();
   const start = points[0];
   const end = points[1];
   const x1 = project(start.x_nm, view.minX, view.maxX, 44, canvas.width - 44);
   const y1 = project(start.y_nm, view.minY, view.maxY, canvas.height - 44, 44);
   const x2 = project(end.x_nm, view.minX, view.maxX, 44, canvas.width - 44);
   const y2 = project(end.y_nm, view.minY, view.maxY, canvas.height - 44, 44);
-  const width = Math.max(8, Math.min(18, Math.hypot(x2 - x1, y2 - y1) * 0.05));
-  const dx = Math.cos(angle);
-  const dy = Math.sin(angle);
+  const lengthPx = Math.hypot(x2 - x1, y2 - y1);
+  if (!lengthPx) return;
+  const scale = Math.min((canvas.width - 88) / (view.maxX - view.minX), (canvas.height - 88) / (view.maxY - view.minY));
+  const width = _isFinitePositive(widthNm)
+    ? Math.max(4, Math.min(20, (Number(widthNm) * scale) / 2))
+    : Math.max(8, Math.min(18, lengthPx * 0.05));
+  const dx = (x2 - x1) / lengthPx;
+  const dy = (y2 - y1) / lengthPx;
   const px = -dy;
   const py = dx;
 
-  ctx.fillStyle = 'rgba(148, 163, 184, 0.12)';
-  ctx.strokeStyle = 'rgba(226, 232, 240, 0.56)';
+  ctx.fillStyle = isActive ? 'rgba(148, 163, 184, 0.16)' : 'rgba(100, 116, 139, 0.12)';
+  ctx.strokeStyle = isActive ? 'rgba(226, 232, 240, 0.62)' : 'rgba(148, 163, 184, 0.34)';
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(x1 + px * width, y1 + py * width);
@@ -409,8 +510,8 @@ function drawRunway(runwayId) {
   ctx.fill();
   ctx.stroke();
 
-  if (Math.hypot(x2 - x1, y2 - y1) > 90) {
-    ctx.strokeStyle = 'rgba(248, 250, 252, 0.68)';
+  if (lengthPx > 90) {
+    ctx.strokeStyle = isActive ? 'rgba(248, 250, 252, 0.68)' : 'rgba(203, 213, 225, 0.42)';
     ctx.lineWidth = 2;
     ctx.setLineDash([18, 12]);
     ctx.beginPath();
@@ -420,7 +521,7 @@ function drawRunway(runwayId) {
     ctx.setLineDash([]);
   }
 
-  ctx.strokeStyle = '#f8fafc';
+  ctx.strokeStyle = isActive ? '#f8fafc' : 'rgba(203, 213, 225, 0.5)';
   ctx.lineWidth = 4;
   ctx.beginPath();
   ctx.moveTo(x1 + px * width * 0.8, y1 + py * width * 0.8);
@@ -429,12 +530,45 @@ function drawRunway(runwayId) {
   ctx.lineTo(x2 - px * width * 0.8, y2 - py * width * 0.8);
   ctx.stroke();
 
-  ctx.fillStyle = '#f8fafc';
+  ctx.fillStyle = isActive ? '#f8fafc' : 'rgba(203, 213, 225, 0.62)';
   ctx.font = '700 12px Arial';
   ctx.textAlign = 'center';
   ctx.fillText(runwayId, x1 - dx * 16, y1 - dy * 16);
   ctx.fillText(oppositeRunway(runwayId), x2 + dx * 16, y2 + dy * 16);
   ctx.textAlign = 'start';
+}
+
+function layoutWorldPoints(layout) {
+  if (!layout || typeof layout !== 'object') return [];
+  const points = [];
+  (Array.isArray(layout.runways) ? layout.runways : []).forEach((runway) => points.push(...(validPointList(runway?.ends, 2, true) || [])));
+  (Array.isArray(layout.taxiways) ? layout.taxiways : []).forEach((taxiway) => points.push(...(validPointList(taxiway?.points, 2) || [])));
+  (Array.isArray(layout.aprons) ? layout.aprons : []).forEach((apron) => points.push(...(validPointList(apron?.polygon, 3) || [])));
+  (Array.isArray(layout.stands) ? layout.stands : []).forEach((stand) => {
+    if (isWorldPoint(stand?.position)) points.push(stand.position);
+  });
+  return points;
+}
+
+function findLayoutRunway(layout, runwayId) {
+  if (!layout || !Array.isArray(layout.runways)) return null;
+  return layout.runways.find((runway) => runway?.id === runwayId && validPointList(runway.ends, 2, true)) || null;
+}
+
+function validPointList(points, minimum, exact = false) {
+  if (!Array.isArray(points)) return null;
+  if (exact ? points.length !== minimum : points.length < minimum) return null;
+  return points.every(isWorldPoint) ? points : null;
+}
+
+function isWorldPoint(point) {
+  return point
+    && Number.isFinite(Number(point.x_nm))
+    && Number.isFinite(Number(point.y_nm));
+}
+
+function _isFinitePositive(value) {
+  return Number.isFinite(Number(value)) && Number(value) > 0;
 }
 
 function runwayWorldPoints(runwayId) {
