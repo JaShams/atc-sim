@@ -9,5 +9,30 @@
   "aircraft": [
     {"callsign": "ARRF1", "role": "arrival", "x_nm": -3.0, "y_nm": 0.2, "altitude_ft": 900, "speed_kt": 155, "heading_deg": 90, "status": "on_final", "target_runway": "09"},
     {"callsign": "DEPQ1", "role": "departure", "x_nm": 0, "y_nm": 0, "altitude_ft": 0, "speed_kt": 0, "heading_deg": 90, "status": "waiting_departure", "target_runway": "09"}
-  ]
+  ],
+  "scenario_metadata": {
+    "tags": [
+      "efficiency",
+      "event"
+    ],
+    "difficulty_tier": "advanced",
+    "intended_stressors": [
+      "active runway flip after wind shift",
+      "arrival-final versus queued departure coordination"
+    ],
+    "expected_baseline_ranges": {
+      "score": [
+        45,
+        105
+      ],
+      "arrival_delay": [
+        0,
+        900
+      ],
+      "departure_delay": [
+        0,
+        900
+      ]
+    }
+  }
 }

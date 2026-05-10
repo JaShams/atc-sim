@@ -9,5 +9,30 @@
     {"callsign": "ARR_EMG", "role": "arrival", "x_nm": -4.0, "y_nm": 0.0, "altitude_ft": 1200, "speed_kt": 160, "heading_deg": 90, "status": "on_final", "target_runway": "27"},
     {"callsign": "TRAF1", "role": "departure", "x_nm": 0, "y_nm": 0, "altitude_ft": 0, "speed_kt": 30, "heading_deg": 270, "status": "rolling", "target_runway": "27"},
     {"callsign": "DEP2", "role": "departure", "x_nm": 0, "y_nm": 0, "altitude_ft": 0, "speed_kt": 0, "heading_deg": 270, "status": "waiting_departure", "target_runway": "27"}
-  ]
+  ],
+  "scenario_metadata": {
+    "tags": [
+      "safety",
+      "event"
+    ],
+    "difficulty_tier": "expert",
+    "intended_stressors": [
+      "runway occupancy during emergency arrival",
+      "time-critical go-around or hold decision"
+    ],
+    "expected_baseline_ranges": {
+      "score": [
+        40,
+        110
+      ],
+      "emergency_handled_count": [
+        0,
+        1
+      ],
+      "runway_incursion_avoided_count": [
+        0,
+        1
+      ]
+    }
+  }
 }
