@@ -14,7 +14,7 @@ from atc_benchmark.simulator.engine import load_world, run
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--scenarios-dir", default="scenarios")
-    parser.add_argument("--agent", choices=["heuristic", "noop", "random"], default="heuristic")
+    parser.add_argument("--agent", choices=["heuristic", "noop", "random", "llm"], default="heuristic")
     parser.add_argument("--output-dir", default="outputs/batch")
     parser.add_argument("--max-ticks", type=int, default=300)
     args = parser.parse_args()
