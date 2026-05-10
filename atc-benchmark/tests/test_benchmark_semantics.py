@@ -114,3 +114,31 @@ def test_runway_protection_ignores_arrivals_flying_away():
     arr.heading_deg = 90
     _, invalid = validate_actions(world, [{"aircraft": "DEP1", "type": "clear_for_takeoff"}])
     assert not invalid
+
+
+def test_takeoff_runway_occupancy_persists_until_timer_expires():
+    world = load_world(Path("scenarios/crossing_conflict_001.json"))
+    dep = world.aircraft["DEP1"]
+    apply_actions(world, [{"aircraft": "DEP1", "type": "clear_for_takeoff"}])
+    assert world.airport.runway_occupied_by == dep.callsign
+    assert world.airport.occupied_until_sec is not None
+    from atc_benchmark.simulator.engine import advance
+
+    advance(world)
+    world.time_sec += world.tick_sec
+    assert world.airport.runway_occupied_by == dep.callsign
+
+
+def test_landing_sets_vacating_phase_and_release_time():
+    world = load_world(Path("scenarios/crossing_conflict_001.json"))
+    arr = world.aircraft["ARR1"]
+    arr.status = "on_final"
+    arr.x_nm = 0.0
+    arr.y_nm = 0.0
+    arr.altitude_ft = 200
+    from atc_benchmark.simulator.engine import advance
+
+    advance(world)
+    assert world.airport.runway_occupied_by == "ARR1"
+    assert world.airport.runway_phase == "vacating"
+    assert world.airport.occupied_until_sec is not None

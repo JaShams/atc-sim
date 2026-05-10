@@ -44,6 +44,8 @@ class AirportState:
     runway_id: str
     active_runway: str
     runway_occupied_by: str | None = None
+    runway_phase: str | None = None
+    occupied_until_sec: int | None = None
     departure_queue: list[str] = field(default_factory=list)
 
 
@@ -100,6 +102,8 @@ class WorldState:
                 "runway_id": self.airport.runway_id,
                 "active_runway": self.airport.active_runway,
                 "runway_occupied_by": self.airport.runway_occupied_by,
+                "runway_phase": self.airport.runway_phase,
+                "occupied_until_sec": self.airport.occupied_until_sec,
                 "departure_queue": list(self.airport.departure_queue),
             },
             "weather": self.weather.__dict__.copy(),
