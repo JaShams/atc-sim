@@ -114,6 +114,7 @@ def apply_events(world: WorldState) -> list[dict]:
 def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: dict | None = None) -> dict:
     trace_path.parent.mkdir(parents=True, exist_ok=True)
     invalid_count = 0
+    malformed_agent_outputs_count = 0
     instructions = 0
     loss_sep_count = 0
     min_h = float("inf")
@@ -129,6 +130,8 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
     latest_wind_change_sec: int | None = None
     wind_change_response_latency_sec: int | None = None
     unsafe_clearances_after_wind_change = 0
+    active_conflicts_count_total = 0
+    predicted_conflicts_count_total = 0
     conflict_lifecycle_state: dict[str, dict] = {}
 
     def _update_lifecycle(predictions: list[dict], *, is_action_phase: bool) -> None:
@@ -177,10 +180,12 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
                 loss_sep_count += len(conflicts)
                 min_h = min(min_h, min(c["horizontal_nm"] for c in conflicts))
                 min_v = min(min_v, min(c["vertical_ft"] for c in conflicts))
+            active_conflicts_count_total += len(conflicts)
 
             predictions = predict_conflicts(world)
             _update_lifecycle(predictions, is_action_phase=False)
             conflict_predicted_times.extend(p["in_seconds"] for p in predictions)
+            predicted_conflicts_count_total += len(predictions)
             dps = detect_decision_points(world)
             if triggered_events:
                 for event in triggered_events:
@@ -196,6 +201,7 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
                 instructions += len(actions)
                 valid, invalid = validate_actions(world, actions)
                 invalid = malformed + invalid
+                malformed_agent_outputs_count += len(malformed)
                 invalid_count += len(invalid)
                 before_by_pair = {p["conflict_pair_id"]: p for p in predictions}
                 effects = apply_actions(world, valid)
@@ -265,6 +271,8 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
     }
     raw_score = sum(score_breakdown.values())
     score = max(0.0, raw_score)
+    simulated_hours = world.time_sec / 3600 if world.time_sec > 0 else 0.0
+    throughput_ops_per_hour = ((landings + departures_ok) / simulated_hours) if simulated_hours > 0 else 0.0
     result = {
         "score": score,
         "score_breakdown": score_breakdown,
@@ -285,6 +293,11 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
             "emergency_unhandled_count": emergency_unhandled_count,
             "wind_change_response_latency_sec": wind_change_response_latency_sec,
             "unsafe_clearances_after_wind_change": unsafe_clearances_after_wind_change,
+            "runway_unsafe_clearance_count": unsafe_clearances_after_wind_change,
+            "malformed_agent_outputs_count": malformed_agent_outputs_count,
+            "active_conflicts_count_total": active_conflicts_count_total,
+            "predicted_conflicts_count_total": predicted_conflicts_count_total,
+            "throughput_ops_per_hour": throughput_ops_per_hour,
         },
     }
     if manifest is not None:

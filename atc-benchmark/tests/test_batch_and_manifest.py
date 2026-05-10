@@ -16,6 +16,19 @@ def test_malformed_agent_output_becomes_invalid_command(tmp_path):
     manifest = build_manifest(Path("scenarios/crossing_conflict_001.json"), world, "bad", 1)
     result = run(world, BadAgent(), max_ticks=1, trace_path=tmp_path / "trace.jsonl", manifest=manifest)
     assert result["control_quality"]["invalid_commands"] >= 1
+    assert result["metrics"]["malformed_agent_outputs_count"] >= 1
+
+
+def test_new_metric_fields_and_types(tmp_path):
+    world = load_world(Path("scenarios/crossing_conflict_001.json"))
+    manifest = build_manifest(Path("scenarios/crossing_conflict_001.json"), world, "noop", 2)
+    result = run(world, BadAgent(), max_ticks=1, trace_path=tmp_path / "trace.jsonl", manifest=manifest)
+    metrics = result["metrics"]
+    assert isinstance(metrics["active_conflicts_count_total"], int)
+    assert isinstance(metrics["predicted_conflicts_count_total"], int)
+    assert isinstance(metrics["runway_unsafe_clearance_count"], int)
+    assert isinstance(metrics["malformed_agent_outputs_count"], int)
+    assert isinstance(metrics["throughput_ops_per_hour"], float)
 
 
 def test_run_manifest_reproducible_fields(tmp_path):
@@ -41,6 +54,16 @@ def test_batch_evaluator_outputs(tmp_path, monkeypatch):
     assert (out / "summary.csv").exists()
     summary = json.loads((out / "summary.json").read_text())
     assert summary["count"] > 0
+    assert "total_active_conflicts_count" in summary
+    assert "total_predicted_conflicts_count" in summary
+    assert "total_runway_unsafe_clearances" in summary
+    assert "total_malformed_agent_outputs" in summary
+    assert "average_throughput_ops_per_hour" in summary
     first = summary["scenarios"][0]["scenario"].replace(".json", "")
+    assert "active_conflicts_count_total" in summary["scenarios"][0]
+    assert "predicted_conflicts_count_total" in summary["scenarios"][0]
+    assert "runway_unsafe_clearance_count" in summary["scenarios"][0]
+    assert "malformed_agent_outputs_count" in summary["scenarios"][0]
+    assert "throughput_ops_per_hour" in summary["scenarios"][0]
     assert (out / "scores" / f"{first}.json").exists()
     assert (out / "traces" / f"{first}.jsonl").exists()
