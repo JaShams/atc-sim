@@ -1,4 +1,61 @@
-{"tick_sec":5,"airport":{"runway_id":"09","active_runway":"09","runway_occupied_by":null,"departure_queue":[]},"rules":{"lookahead_seconds":70},"aircraft":[
-{"callsign":"ARR1","role":"arrival","x_nm":-12,"y_nm":0,"altitude_ft":2600,"speed_kt":170,"heading_deg":90,"status":"on_final","target_runway":"09"},
-{"callsign":"ARR2","role":"arrival","x_nm":-16,"y_nm":0,"altitude_ft":3400,"speed_kt":190,"heading_deg":90,"status":"airborne","target_runway":"09"}
-]}
+{
+  "tick_sec": 5,
+  "airport": {
+    "runway_id": "09",
+    "active_runway": "09",
+    "runway_occupied_by": null,
+    "departure_queue": []
+  },
+  "rules": {
+    "lookahead_seconds": 70
+  },
+  "aircraft": [
+    {
+      "callsign": "ARR1",
+      "role": "arrival",
+      "x_nm": -12,
+      "y_nm": 0,
+      "altitude_ft": 2600,
+      "speed_kt": 170,
+      "heading_deg": 90,
+      "status": "on_final",
+      "target_runway": "09"
+    },
+    {
+      "callsign": "ARR2",
+      "role": "arrival",
+      "x_nm": -16,
+      "y_nm": 0,
+      "altitude_ft": 3400,
+      "speed_kt": 190,
+      "heading_deg": 90,
+      "status": "airborne",
+      "target_runway": "09"
+    }
+  ],
+  "scenario_metadata": {
+    "tags": [
+      "efficiency",
+      "safety"
+    ],
+    "difficulty_tier": "intermediate",
+    "intended_stressors": [
+      "arrival sequencing",
+      "single-runway bottleneck"
+    ],
+    "expected_baseline_ranges": {
+      "score": [
+        60,
+        100
+      ],
+      "arrival_delay": [
+        0,
+        900
+      ],
+      "throughput_ops_per_hour": [
+        20,
+        90
+      ]
+    }
+  }
+}
