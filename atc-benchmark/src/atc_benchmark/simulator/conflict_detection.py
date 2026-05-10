@@ -10,11 +10,13 @@ def horizontal_distance_nm(a, b) -> float:
     return hypot(a.x_nm - b.x_nm, a.y_nm - b.y_nm)
 
 
-def _project_aircraft(ac, seconds: int) -> tuple[float, float, float]:
+def _project_aircraft(ac, seconds: int, wind_dir_deg: float = 0.0, wind_speed_kt: float = 0.0) -> tuple[float, float, float]:
     dt_hr = seconds / 3600
     rad = radians(ac.heading_deg)
-    x = ac.x_nm + sin(rad) * ac.speed_kt * dt_hr
-    y = ac.y_nm + cos(rad) * ac.speed_kt * dt_hr
+    wind_to_deg = (wind_dir_deg + 180) % 360
+    wind_rad = radians(wind_to_deg)
+    x = ac.x_nm + (sin(rad) * ac.speed_kt + sin(wind_rad) * wind_speed_kt) * dt_hr
+    y = ac.y_nm + (cos(rad) * ac.speed_kt + cos(wind_rad) * wind_speed_kt) * dt_hr
     alt = ac.altitude_ft + ac.vertical_rate_fpm * (seconds / 60)
     return x, y, alt
 
@@ -55,8 +57,8 @@ def predict_conflicts(world: WorldState) -> list[dict]:
         first_h = None
         first_v = None
         for t in range(step, world.rules.lookahead_seconds + step, step):
-            ax, ay, aa = _project_aircraft(a, t)
-            bx, by, ba = _project_aircraft(b, t)
+            ax, ay, aa = _project_aircraft(a, t, world.weather.wind_dir_deg, world.weather.wind_speed_kt)
+            bx, by, ba = _project_aircraft(b, t, world.weather.wind_dir_deg, world.weather.wind_speed_kt)
             h = hypot(ax - bx, ay - by)
             v = abs(aa - ba)
             if h < world.rules.min_horizontal_nm and v < world.rules.min_vertical_ft:

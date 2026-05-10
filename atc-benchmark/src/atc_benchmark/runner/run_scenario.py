@@ -7,6 +7,7 @@ from pathlib import Path
 from atc_benchmark import __version__
 from atc_benchmark.paths import resolve_scenario_path
 from atc_benchmark.agents.heuristic_agent import HeuristicAgent
+from atc_benchmark.agents.llm_agent import LLMAgent
 from atc_benchmark.agents.noop_agent import NoOpAgent
 from atc_benchmark.agents.random_valid_action_agent import RandomValidActionAgent
 from atc_benchmark.simulator.engine import load_world, run, scenario_hash
@@ -19,6 +20,13 @@ def build_agent(name: str):
         return NoOpAgent()
     if name == "random":
         return RandomValidActionAgent(seed=0)
+    if name == "llm":
+        class StubLLMClient:
+            def complete(self, prompt: str) -> str:
+                _ = prompt
+                return '{"actions": []}'
+
+        return LLMAgent(client=StubLLMClient())
     raise ValueError(f"unknown agent: {name}")
 
 
@@ -40,7 +48,7 @@ def build_manifest(scenario: Path, world, agent_name: str, max_ticks: int) -> di
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("scenario")
-    parser.add_argument("--agent", choices=["heuristic", "noop", "random"], default="heuristic")
+    parser.add_argument("--agent", choices=["heuristic", "noop", "random", "llm"], default="heuristic")
     parser.add_argument("--trace", default="outputs/traces/trace.jsonl")
     parser.add_argument("--score", default="outputs/scores/score.json")
     parser.add_argument("--max-ticks", type=int, default=300)

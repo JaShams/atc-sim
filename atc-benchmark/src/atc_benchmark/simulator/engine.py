@@ -214,9 +214,17 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
             actions = []
             obs = None
             invalid = []
+            agent_exception = None
             if dps:
                 obs = {"time_sec": world.time_sec, "decision_points": dps, "snapshot": world.snapshot()}
-                raw_actions, malformed = extract_actions(agent.act(obs))
+                try:
+                    agent_output = agent.act(obs)
+                except Exception as exc:  # noqa: BLE001
+                    malformed = [{"action": None, "reason": "agent_exception", "exception_type": type(exc).__name__, "exception_message": str(exc)}]
+                    raw_actions = []
+                    agent_exception = {"type": type(exc).__name__, "message": str(exc)}
+                else:
+                    raw_actions, malformed = extract_actions(agent_output)
                 actions = raw_actions
                 instructions += len(actions)
                 emergency_active = any(
@@ -256,6 +264,7 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
                 "triggered_events": triggered_events,
                 "decision_points": dps,
                 "observation": obs,
+                "agent_exception": agent_exception,
                 "actions": actions,
                 "invalid_actions": invalid,
                 "conflicts": conflicts,
