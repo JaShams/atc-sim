@@ -1,4 +1,4 @@
-{"tick_sec":5,"airport":{"runway_id":"09","active_runway":"09","runway_occupied_by":null,"departure_queue":["DEP1"]},"weather":{"wind_dir_deg":80,"wind_speed_kt":8},"rules":{"lookahead_seconds":60},"events":[{"time_sec":15,"type":"wind_change","wind_dir_deg":260,"wind_speed_kt":18,"active_runway":"27"}],"aircraft":[
+{"tick_sec":5,"airport":{"runway_id":"09","active_runway":"09","runway_occupied_by":null,"departure_queue":["DEP1"]},"weather":{"wind_dir_deg":80,"wind_speed_kt":8},"rules":{"lookahead_seconds":60},"events":[{"time_sec":15,"type":"wind_change","wind_dir_deg":260,"wind_speed_kt":18}],"aircraft":[
 {"callsign":"ARR1","role":"arrival","x_nm":-9,"y_nm":1,"altitude_ft":2600,"speed_kt":170,"heading_deg":90,"status":"airborne","target_runway":"09"},
 {"callsign":"DEP1","role":"departure","x_nm":0,"y_nm":0,"altitude_ft":0,"speed_kt":0,"heading_deg":90,"status":"waiting_departure","target_runway":"09"}
 ]}
