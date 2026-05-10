@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 from atc_benchmark.paths import resolve_scenario_path, scenarios_dir
 
@@ -34,6 +35,20 @@ def test_run_returns_score(tmp_path):
     assert "score" in result
     assert "metrics" in result
     assert (tmp_path / "trace.jsonl").exists()
+
+
+def test_tick_outcome_uses_deterministic_delta_classifier(tmp_path):
+    world = _world_for_predicted_conflict_tests()
+    world.rules.outcome_horizon_ticks = 2
+    world.rules.outcome_immediate_epsilon = 0.0001
+    world.rules.outcome_window_epsilon = 0.0001
+    run(world, ScriptedAgent([[{"aircraft": "A1", "type": "assign_heading", "heading": 90}]]), max_ticks=3, trace_path=tmp_path / "trace.jsonl")
+    lines = [json.loads(line) for line in (tmp_path / "trace.jsonl").read_text().splitlines()]
+    outcome = lines[0]["tick_explanation"]["outcome"]
+    assert "immediate_delta" in outcome
+    assert "window_delta" in outcome
+    assert outcome["horizon_ticks"] == 2
+    assert outcome["kind"] in {"helped", "hurt", "neutral"}
 
 
 def _world_for_predicted_conflict_tests() -> WorldState:
