@@ -95,3 +95,18 @@ def test_emergency_handling_affects_score(tmp_path):
     handled_total = handled["score_breakdown"]["emergency_handled"] + handled["score_breakdown"]["emergency_unhandled"]
     unhandled_total = unhandled["score_breakdown"]["emergency_handled"] + unhandled["score_breakdown"]["emergency_unhandled"]
     assert handled_total > unhandled_total
+
+
+def test_conflict_lifecycle_scores_multi_tick_transitions(tmp_path):
+    world = _world_for_predicted_conflict_tests()
+    agent = ScriptedAgent(
+        [
+            [{"aircraft": "A1", "type": "assign_speed", "speed_kt": 200}],
+            [{"aircraft": "A1", "type": "assign_speed", "speed_kt": 280}],
+            [{"aircraft": "A1", "type": "assign_heading", "heading": 90}],
+        ]
+    )
+    result = run(world, agent, max_ticks=3, trace_path=tmp_path / "trace.jsonl")
+    assert result["score_breakdown"]["conflicts_delayed"] >= 0
+    assert result["score_breakdown"]["conflicts_worsened"] <= 0
+    assert result["score_breakdown"]["conflict_resolved"] > 0
