@@ -19,20 +19,25 @@ def _project_aircraft(ac, seconds: int) -> tuple[float, float, float]:
     return x, y, alt
 
 
+def _conflict_id(a_callsign: str, b_callsign: str, first_predicted_time_sec: int) -> str:
+    low, high = sorted((a_callsign, b_callsign))
+    return f"{low}|{high}|{first_predicted_time_sec}"
+
+
 def detect_conflicts(world: WorldState) -> list[dict]:
     conflicts: list[dict] = []
-    ac_list = [a for a in world.aircraft.values() if a.status in {"airborne", "on_final", "go_around", "departed"}]
+    ac_list = [a for a in world.aircraft.values() if a.status in {"airborne", "on_final", "go_around", "rolling", "airborne_departure"}]
     for a, b in combinations(ac_list, 2):
         h = horizontal_distance_nm(a, b)
         v = abs(a.altitude_ft - b.altitude_ft)
         if h < world.rules.min_horizontal_nm and v < world.rules.min_vertical_ft:
-            conflicts.append({"type": "loss_of_separation", "aircraft": [a.callsign, b.callsign], "horizontal_nm": h, "vertical_ft": v})
+            conflicts.append({"type": "loss_of_separation", "id": _conflict_id(a.callsign, b.callsign, world.time_sec), "aircraft": [a.callsign, b.callsign], "horizontal_nm": h, "vertical_ft": v})
     return conflicts
 
 
 def predict_conflicts(world: WorldState) -> list[dict]:
     predictions: list[dict] = []
-    ac_list = [a for a in world.aircraft.values() if a.status in {"airborne", "on_final", "go_around", "departed"}]
+    ac_list = [a for a in world.aircraft.values() if a.status in {"airborne", "on_final", "go_around", "rolling", "airborne_departure"}]
     step = max(world.tick_sec, 1)
     for a, b in combinations(ac_list, 2):
         first_conflict_time = None
@@ -49,11 +54,14 @@ def predict_conflicts(world: WorldState) -> list[dict]:
                 first_v = v
                 break
         if first_conflict_time is not None:
+            abs_time = world.time_sec + first_conflict_time
             predictions.append(
                 {
                     "type": "predicted_conflict",
+                    "id": _conflict_id(a.callsign, b.callsign, abs_time),
                     "aircraft": [a.callsign, b.callsign],
                     "in_seconds": first_conflict_time,
+                    "predicted_time_sec": abs_time,
                     "horizontal_nm": first_h,
                     "vertical_ft": first_v,
                 }
