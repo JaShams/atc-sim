@@ -66,6 +66,7 @@ class TickExplanation:
     tick_id: int
     sim_time: int
     call_reason: CallReason = field(default_factory=CallReason)
+    trigger_context: dict[str, Any] = field(default_factory=dict)
     action_chosen: list[dict[str, Any]] = field(default_factory=list)
     alternatives_considered: list[RankedAlternative] = field(default_factory=list)
     outcome: TickOutcome = field(default_factory=TickOutcome)

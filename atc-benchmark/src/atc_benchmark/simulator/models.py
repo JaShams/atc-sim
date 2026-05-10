@@ -68,6 +68,7 @@ class RulesConfig:
     outcome_immediate_epsilon: float = 0.01
     outcome_window_epsilon: float = 0.02
     outcome_normalization_floor: float = 1.0
+    debug_require_trigger_provenance: bool = False
 
 
 @dataclass

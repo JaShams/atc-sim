@@ -44,6 +44,48 @@ def _runway_is_wind_compliant(world: WorldState, threshold_deg: float = 45.0) ->
 
 
 
+def _build_trigger_context(
+    world: WorldState,
+    decision_points: list[dict],
+    triggered_events: list[dict],
+) -> dict:
+    snapshot = world.snapshot()
+    event_ids = [event.get("id") or f"{event.get('type', 'event')}@{event.get('time_sec', world.time_sec)}" for event in triggered_events]
+    dp_types = [dp.get("type", "unknown") for dp in decision_points]
+    return {
+        "provenance": {
+            "source": "simulator.engine.run",
+            "time_sec": world.time_sec,
+            "tick_sec": world.tick_sec,
+        },
+        "decision_point_types": dp_types,
+        "decision_point_count": len(decision_points),
+        "triggered_event_ids": event_ids,
+        "triggered_event_count": len(triggered_events),
+        "thresholds": {
+            "min_horizontal_nm": world.rules.min_horizontal_nm,
+            "min_vertical_ft": world.rules.min_vertical_ft,
+            "lookahead_seconds": world.rules.lookahead_seconds,
+            "runway_arrival_protection_nm": world.rules.runway_arrival_protection_nm,
+            "runway_wind_compliance_deg": 45.0,
+        },
+        "state_snapshot_keys": {
+            "top_level": sorted(snapshot.keys()),
+            "airport": sorted(snapshot.get("airport", {}).keys()),
+            "weather": sorted(snapshot.get("weather", {}).keys()),
+            "aircraft_callsigns": sorted(snapshot.get("aircraft", {}).keys()),
+        },
+    }
+
+
+def _validate_trigger_context(trigger_context: dict) -> bool:
+    provenance = trigger_context.get("provenance") if isinstance(trigger_context, dict) else None
+    if not isinstance(provenance, dict):
+        return False
+    required = {"source", "time_sec", "tick_sec"}
+    return required.issubset(provenance.keys())
+
+
 def advance(world: WorldState) -> None:
     dt_hr = world.tick_sec / 3600
     for ac in world.aircraft.values():
@@ -244,8 +286,12 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
             obs = None
             invalid = []
             agent_exception = None
+            trigger_context = _build_trigger_context(world, dps, triggered_events)
+            if world.rules.debug_require_trigger_provenance and not _validate_trigger_context(trigger_context):
+                raise ValueError("Missing trigger provenance for invocation in debug mode")
+
             if dps:
-                obs = {"time_sec": world.time_sec, "decision_points": dps, "snapshot": world.snapshot()}
+                obs = {"time_sec": world.time_sec, "decision_points": dps, "snapshot": world.snapshot(), "trigger_context": trigger_context}
                 try:
                     agent_output = agent.act(obs)
                 except Exception as exc:  # noqa: BLE001
@@ -318,6 +364,7 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
                         "triggered_event_count": len(triggered_events),
                     },
                 ),
+                trigger_context=trigger_context,
                 action_chosen=actions or [],
                 alternatives_considered=[RankedAlternative(rank=1, action={"type": "no_op"}, score=None)],
                 outcome=TickOutcome(
