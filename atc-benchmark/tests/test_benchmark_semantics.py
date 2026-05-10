@@ -109,6 +109,7 @@ def test_action_creates_secondary_conflict_with_new_pair(tmp_path):
     world.aircraft["A3"].heading_deg = 270
     agent = ScriptedAgent([[{"aircraft": "A1", "type": "assign_heading", "heading": 90}]])
     result = run(world, agent, max_ticks=1, trace_path=tmp_path / "trace.jsonl")
+    # Secondary conflicts are newly introduced conflict pairs that appear only after an action is applied.
     assert result["metrics"]["secondary_conflicts_created_count"] == 1
 
 
