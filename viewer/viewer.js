@@ -24,15 +24,17 @@ scoreFileInput.addEventListener('change', loadFiles);
 slider.addEventListener('input', () => renderAtTick(Number(slider.value)));
 
 async function loadFiles() {
-  if (!traceFileInput.files[0] || !scoreFileInput.files[0]) return;
+  if (!traceFileInput.files[0]) return;
   try {
     traceEvents = await parseJsonl(traceFileInput.files[0]);
-    score = JSON.parse(await scoreFileInput.files[0].text());
+    score = scoreFileInput.files[0] ? JSON.parse(await scoreFileInput.files[0].text()) : null;
     slider.disabled = traceEvents.length === 0;
     slider.min = 0;
     slider.max = Math.max(0, traceEvents.length - 1);
     slider.value = 0;
-    loadStatus.textContent = `Loaded ${traceEvents.length} ticks.`;
+    loadStatus.textContent = score
+      ? `Loaded ${traceEvents.length} ticks and score.`
+      : `Loaded ${traceEvents.length} ticks. Score file optional.`;
     renderScore();
     renderAtTick(0);
   } catch (err) {
@@ -56,7 +58,13 @@ async function parseJsonl(file) {
 }
 
 function renderScore() {
-  if (!score) return;
+  if (!score) {
+    scorePanel.innerHTML = `
+      <h2>Score</h2>
+      <p>No score file loaded.</p>
+    `;
+    return;
+  }
   const breakdown = Object.entries(score.score_breakdown || {})
     .map(([k, v]) => `<li><b>${k}</b>: ${formatNum(v)}</li>`)
     .join('');
@@ -83,11 +91,18 @@ function renderAtTick(index) {
   const aircraftMap = state.aircraft || {};
   const aircraft = Object.values(aircraftMap);
 
-  const conflictSet = new Set((e.conflicts || []).flatMap((c) => [c.a, c.b]));
-  const predictedSet = new Set((e.predicted_conflicts || []).flatMap((c) => [c.a, c.b]));
+  const conflictSet = aircraftSetFromRecords(e.conflicts || []);
+  const predictedSet = aircraftSetFromRecords(e.predicted_conflicts || []);
 
   drawRadar(state, aircraft, conflictSet, predictedSet);
   renderTickDetails(e);
+}
+
+function aircraftSetFromRecords(records) {
+  return new Set(records.flatMap((record) => {
+    if (Array.isArray(record.aircraft)) return record.aircraft;
+    return [record.a, record.b].filter(Boolean);
+  }));
 }
 
 function drawRadar(state, aircraft, conflictSet, predictedSet) {
