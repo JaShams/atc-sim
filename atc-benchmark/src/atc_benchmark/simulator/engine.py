@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from pathlib import Path
 
 from .conflict_detection import detect_conflicts, predict_conflicts
 from .decision_points import detect_decision_points
+from atc_benchmark import __version__
+
+from atc_benchmark.agents.base import extract_actions
 from .models import Aircraft, AirportState, RulesConfig, ScoringConfig, Weather, WorldState
 from .validator import validate_actions
 
@@ -81,7 +85,7 @@ def apply_events(world: WorldState) -> list[dict]:
     return triggered
 
 
-def run(world: WorldState, agent, max_ticks: int, trace_path: Path) -> dict:
+def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: dict | None = None) -> dict:
     trace_path.parent.mkdir(parents=True, exist_ok=True)
     invalid_count = 0
     instructions = 0
@@ -118,9 +122,11 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path) -> dict:
             invalid = []
             if dps:
                 obs = {"time_sec": world.time_sec, "decision_points": dps, "snapshot": world.snapshot()}
-                actions = agent.act(obs).get("actions", [])
+                raw_actions, malformed = extract_actions(agent.act(obs))
+                actions = raw_actions
                 instructions += len(actions)
                 valid, invalid = validate_actions(world, actions)
+                invalid = malformed + invalid
                 invalid_count += len(invalid)
                 before_by_pair = {p["conflict_pair_id"]: p for p in predictions}
                 effects = apply_actions(world, valid)
@@ -187,7 +193,7 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path) -> dict:
     }
     raw_score = sum(score_breakdown.values())
     score = max(0.0, raw_score)
-    return {
+    result = {
         "score": score,
         "score_breakdown": score_breakdown,
         "safety": {"loss_of_separation": loss_sep_count, "min_horizontal_nm": min_h if min_h < float("inf") else None, "min_vertical_ft": min_v if min_v < float("inf") else None},
@@ -207,6 +213,13 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path) -> dict:
             "emergency_unhandled_count": emergency_unhandled_count,
         },
     }
+    if manifest is not None:
+        result["run_manifest"] = manifest
+    return result
+
+
+def scenario_hash(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def load_world(path: Path) -> WorldState:
