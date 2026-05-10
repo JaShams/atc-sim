@@ -12,6 +12,9 @@ def test_invalid_heading_rejected():
 
 def test_takeoff_rejected_if_arrival_too_close():
     world = load_world(Path("scenarios/departure_between_arrivals_001.json"))
+    world.aircraft["ARR1"].x_nm = 4.0
+    world.aircraft["ARR1"].y_nm = 0.0
+    world.aircraft["ARR1"].heading_deg = 270
     _, invalid = validate_actions(world, [{"aircraft": "DEP1", "type": "clear_for_takeoff"}])
     assert invalid and invalid[0]["reason"] == "arrival_too_close"
 

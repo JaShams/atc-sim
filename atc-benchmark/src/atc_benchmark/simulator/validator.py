@@ -1,15 +1,25 @@
 from __future__ import annotations
 
-from math import hypot
+from math import cos, hypot, radians, sin
 
 from .models import ALLOWED_ACTION_TYPES, WorldState
 
 
-def _closest_arrival_distance(world: WorldState) -> float | None:
+def _runway_heading_deg(active_runway: str) -> float:
+    return (int(active_runway) % 36) * 10
+
+
+def _closest_inbound_arrival_final_distance(world: WorldState) -> float | None:
     dists = []
+    rw_rad = radians(_runway_heading_deg(world.airport.active_runway))
+    ux, uy = sin(rw_rad), cos(rw_rad)
     for ac in world.aircraft.values():
         if ac.role == "arrival" and ac.status in {"airborne", "on_final", "go_around"}:
-            dists.append(hypot(ac.x_nm, ac.y_nm))
+            velx, vely = sin(radians(ac.heading_deg)), cos(radians(ac.heading_deg))
+            inbound = (velx * (-ac.x_nm) + vely * (-ac.y_nm)) > 0
+            along_final_nm = -(ac.x_nm * ux + ac.y_nm * uy)
+            if inbound and along_final_nm > 0:
+                dists.append(along_final_nm)
     return min(dists) if dists else None
 
 
@@ -45,7 +55,7 @@ def validate_actions(world: WorldState, actions: list[dict]) -> tuple[list[dict]
             elif atype == "clear_for_takeoff" and cs not in world.airport.departure_queue:
                 reason = "not_in_departure_queue"
             elif atype == "clear_for_takeoff":
-                closest = _closest_arrival_distance(world)
+                closest = _closest_inbound_arrival_final_distance(world)
                 if closest is not None and closest < world.rules.runway_arrival_protection_nm:
                     reason = "arrival_too_close"
             elif atype == "go_around" and ac.status not in {"on_final", "airborne"}:

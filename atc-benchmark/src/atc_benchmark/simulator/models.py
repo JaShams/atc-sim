@@ -32,6 +32,11 @@ class Aircraft:
     target_runway: str | None = None
     clearance: str | None = None
     emergency: bool = False
+    ready_time_sec: int | None = None
+    takeoff_time_sec: int | None = None
+    landing_time_sec: int | None = None
+    ideal_takeoff_time_sec: int | None = None
+    ideal_landing_time_sec: int | None = None
 
 
 @dataclass

@@ -13,14 +13,18 @@ from .validator import validate_actions
 def advance(world: WorldState) -> None:
     dt_hr = world.tick_sec / 3600
     for ac in world.aircraft.values():
-        if ac.status in {"airborne", "on_final", "go_around", "departed"}:
+        if ac.status in {"airborne", "on_final", "go_around", "rolling", "airborne_departure"}:
             rad = math.radians(ac.heading_deg)
             ac.x_nm += math.sin(rad) * ac.speed_kt * dt_hr
             ac.y_nm += math.cos(rad) * ac.speed_kt * dt_hr
             ac.altitude_ft += ac.vertical_rate_fpm * (world.tick_sec / 60)
             if ac.role == "arrival" and abs(ac.x_nm) < 1.5 and abs(ac.y_nm) < 1.5 and ac.altitude_ft < 300:
                 ac.status = "landed"
+                ac.landing_time_sec = world.time_sec + world.tick_sec
                 world.airport.runway_occupied_by = ac.callsign
+            if ac.status == "rolling":
+                ac.status = "airborne_departure"
+                ac.takeoff_time_sec = world.time_sec + world.tick_sec
 
 
 def apply_actions(world: WorldState, actions: list[dict]) -> dict:
@@ -40,7 +44,9 @@ def apply_actions(world: WorldState, actions: list[dict]) -> dict:
             ac.status = "on_final"
         elif t == "clear_for_takeoff":
             ac.clearance = "cleared_for_takeoff"
-            ac.status = "departed"
+            ac.status = "rolling"
+            if ac.ready_time_sec is None:
+                ac.ready_time_sec = world.time_sec
             world.airport.runway_occupied_by = ac.callsign
             if ac.callsign in world.airport.departure_queue:
                 world.airport.departure_queue.remove(ac.callsign)
@@ -81,7 +87,7 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path) -> dict:
     min_h = float("inf")
     min_v = float("inf")
     conflict_resolved_count = 0
-    prior_active_pairs: set[tuple[str, str]] = set()
+    prior_predicted_ids: set[str] = set()
     conflict_predicted_times: list[int] = []
     new_conflicts_created_by_action = 0
     go_around_count = 0
@@ -90,10 +96,7 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path) -> dict:
         for _ in range(max_ticks):
             triggered_events = apply_events(world)
             conflicts = detect_conflicts(world)
-            active_pairs = {tuple(sorted(c["aircraft"])) for c in conflicts}
-            if prior_active_pairs and len(active_pairs) < len(prior_active_pairs):
-                conflict_resolved_count += len(prior_active_pairs - active_pairs)
-            prior_active_pairs = active_pairs
+            active_pairs = {c["id"] for c in conflicts}
 
             if conflicts:
                 loss_sep_count += len(conflicts)
@@ -116,12 +119,12 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path) -> dict:
                 instructions += len(actions)
                 valid, invalid = validate_actions(world, actions)
                 invalid_count += len(invalid)
-                before_count = len(conflicts)
+                before_predictions = {p["id"] for p in predictions}
                 effects = apply_actions(world, valid)
                 go_around_count += effects["go_around_count"]
-                after_count = len(detect_conflicts(world))
-                if after_count > before_count:
-                    new_conflicts_created_by_action += after_count - before_count
+                after_predictions = {p["id"] for p in predict_conflicts(world)}
+                conflict_resolved_count += len(before_predictions - after_predictions)
+                new_conflicts_created_by_action += len(after_predictions - before_predictions)
 
             event = {
                 "time": world.time_sec,
@@ -136,7 +139,7 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path) -> dict:
             }
             f.write(json.dumps(event) + "\n")
 
-            if world.airport.runway_occupied_by and all(a.status in {"landed", "departed"} for a in world.aircraft.values()):
+            if world.airport.runway_occupied_by and all(a.status in {"landed", "exited_airspace"} for a in world.aircraft.values()):
                 break
             advance(world)
             world.time_sec += world.tick_sec
@@ -145,10 +148,13 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path) -> dict:
 
     arrivals = [a for a in world.aircraft.values() if a.role == "arrival"]
     departures = [a for a in world.aircraft.values() if a.role == "departure"]
+    for a in departures:
+        if a.status in {"airborne_departure"} and (abs(a.x_nm) > 30 or abs(a.y_nm) > 30):
+            a.status = "exited_airspace"
     landings = sum(1 for a in arrivals if a.status == "landed")
-    departures_ok = sum(1 for a in departures if a.status == "departed")
-    arrival_delay = len(arrivals) - landings
-    departure_delay = len(departures) - departures_ok
+    departures_ok = sum(1 for a in departures if a.status in {"airborne_departure", "exited_airspace", "landed"})
+    arrival_delay = sum(max(0, (a.landing_time_sec or world.time_sec) - a.ideal_landing_time_sec) for a in arrivals if a.ideal_landing_time_sec is not None)
+    departure_delay = sum(max(0, (a.takeoff_time_sec or world.time_sec) - a.ideal_takeoff_time_sec) for a in departures if a.ideal_takeoff_time_sec is not None)
     emergency_handled_count = sum(1 for a in arrivals if a.emergency and a.status == "landed")
 
     score = max(0, 100 - loss_sep_count * 20 - invalid_count * 5 + landings * 3 + departures_ok * 2)
@@ -170,6 +176,11 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path) -> dict:
 def load_world(path: Path) -> WorldState:
     data = json.loads(path.read_text())
     ac = {a["callsign"]: Aircraft(**a) for a in data["aircraft"]}
+    for aircraft in ac.values():
+        if aircraft.role == "departure" and aircraft.status == "departed":
+            aircraft.status = "airborne_departure"
+        if aircraft.role == "departure" and aircraft.status == "waiting_departure" and aircraft.ready_time_sec is None:
+            aircraft.ready_time_sec = 0
     return WorldState(
         time_sec=0,
         tick_sec=data.get("tick_sec", 5),
