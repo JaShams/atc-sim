@@ -5,6 +5,10 @@ const tickLabel = document.getElementById('tickLabel');
 const loadStatus = document.getElementById('loadStatus');
 const scorePanel = document.getElementById('scorePanel');
 const tickPanel = document.getElementById('tickPanel');
+const timelineList = document.getElementById('timelineList');
+const filterHurt = document.getElementById('filterHurt');
+const filterSafety = document.getElementById('filterSafety');
+const filterLargeDelta = document.getElementById('filterLargeDelta');
 const canvas = document.getElementById('radar');
 const ctx = canvas.getContext('2d');
 
@@ -22,6 +26,9 @@ const palette = {
 traceFileInput.addEventListener('change', loadFiles);
 scoreFileInput.addEventListener('change', loadFiles);
 slider.addEventListener('input', () => renderAtTick(Number(slider.value)));
+filterHurt.addEventListener('change', renderTimeline);
+filterSafety.addEventListener('change', renderTimeline);
+filterLargeDelta.addEventListener('change', renderTimeline);
 
 async function loadFiles() {
   if (!traceFileInput.files[0]) return;
@@ -37,6 +44,7 @@ async function loadFiles() {
       : `Loaded ${traceEvents.length} ticks. Score file optional.`;
     renderScore();
     renderAtTick(0);
+    renderTimeline();
   } catch (err) {
     loadStatus.textContent = `Failed to parse files: ${err.message}`;
   }
@@ -191,6 +199,125 @@ function renderTickDetails(e) {
     <p><b>Predicted Conflicts:</b> ${fmtJson(e.predicted_conflicts)}</p>
     <p><b>Triggered Events:</b> ${fmtJson(e.triggered_events)}</p>
   `;
+}
+
+function renderTimeline() {
+  if (!traceEvents.length) {
+    timelineList.innerHTML = '<p class="muted">Load a trace file to see timeline entries.</p>';
+    return;
+  }
+
+  const rows = traceEvents
+    .map((event, idx) => ({ idx, event, explanation: event.tick_explanation || {} }))
+    .filter(({ event, explanation }) => {
+      const outcome = explanation.outcome?.kind || 'unknown';
+      const immediateDelta = Number(explanation.outcome?.immediate_delta || 0);
+      const isSafetyTriggered = isSafetyTriggeredCall(event, explanation);
+      if (filterHurt.checked && outcome !== 'hurt') return false;
+      if (filterSafety.checked && !isSafetyTriggered) return false;
+      if (filterLargeDelta.checked && Math.abs(immediateDelta) < 0.05) return false;
+      return true;
+    })
+    .map(({ idx, event, explanation }) => ({ idx, event, explanation }))
+    .reduce((acc, row) => {
+      const rendered = renderTimelineRow(row.idx, row.event, row.explanation, acc.componentTotals);
+      const deltas = row.explanation.score_delta_by_component || {};
+      for (const [component, delta] of Object.entries(deltas)) {
+        acc.componentTotals[component] = Number(acc.componentTotals[component] || 0) + Number(delta || 0);
+      }
+      acc.rows.push(rendered);
+      return acc;
+    }, { rows: [], componentTotals: {} }).rows
+    .join('');
+
+  timelineList.innerHTML = rows || '<p class="muted">No ticks match the selected filters.</p>';
+
+  timelineList.querySelectorAll('.jump-link').forEach((button) => {
+    button.addEventListener('click', () => {
+      const tickIdx = Number(button.getAttribute('data-tick'));
+      slider.value = tickIdx;
+      renderAtTick(tickIdx);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  });
+}
+
+function renderTimelineRow(idx, event, explanation, componentTotals) {
+  const outcomeKind = explanation.outcome?.kind || 'unknown';
+  const callReason = explanation.call_reason?.type || 'none';
+  const action = summarizeAction(explanation.action_chosen || event.actions || []);
+  const immediateDelta = Number(explanation.outcome?.immediate_delta || 0);
+  const totalDelta = Number(explanation.score_after || 0) - Number(explanation.score_before || 0);
+  const componentHtml = renderComponentTable(explanation, componentTotals);
+
+  return `
+    <details class="timeline-item">
+      <summary class="timeline-summary">
+        <span class="timeline-summary-left">
+          <span>#${idx + 1}</span>
+          <span class="outcome-badge outcome-${escapeHtml(outcomeKind)}">${escapeHtml(outcomeKind)}</span>
+          <span><b>Reason:</b> ${escapeHtml(callReason)}</span>
+          <span><b>Action:</b> ${escapeHtml(action)}</span>
+        </span>
+        <span class="timeline-summary-right">Δ ${formatNum(totalDelta)} <span class="muted">(norm ${formatNum(immediateDelta)})</span></span>
+      </summary>
+      <div>
+        <p><b>Outcome label:</b> ${escapeHtml(outcomeKind)}</p>
+        ${componentHtml}
+        <div class="timeline-actions">
+          <button class="jump-link" data-tick="${idx}">Jump to replay/state inspector</button>
+        </div>
+      </div>
+    </details>
+  `;
+}
+
+function renderComponentTable(explanation, componentTotals) {
+  const scoreBefore = Number(explanation.score_before || 0);
+  const scoreAfter = Number(explanation.score_after || 0);
+  const totalDelta = scoreAfter - scoreBefore;
+  const deltaByComponent = explanation.score_delta_by_component || {};
+  const nonZeroComponents = Object.entries(deltaByComponent).filter(([, delta]) => Number(delta) !== 0);
+
+  if (!nonZeroComponents.length) {
+    return '<p class="muted">No component-level score changes on this tick.</p>';
+  }
+
+  const rows = nonZeroComponents.map(([component, delta]) => {
+    const deltaNum = Number(delta || 0);
+    const pct = totalDelta === 0 ? 0 : (deltaNum / totalDelta) * 100;
+    return `<tr>
+      <td>${escapeHtml(component)}</td>
+      <td>${formatNum(Number(componentTotals[component] || 0))}</td>
+      <td>${formatNum(Number(componentTotals[component] || 0) + deltaNum)}</td>
+      <td>${formatNum(deltaNum)}</td>
+      <td>${formatNum(pct)}%</td>
+    </tr>`;
+  }).join('');
+
+  return `<table class="component-table">
+    <thead><tr><th>Component</th><th>Before</th><th>After</th><th>Delta</th><th>Contribution</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+function isSafetyTriggeredCall(event, explanation) {
+  const reasonType = explanation.call_reason?.type;
+  if (reasonType === 'event') return true;
+  const points = event.decision_points || [];
+  return points.some((dp) => {
+    const type = String(dp.type || '').toLowerCase();
+    const severity = String(dp.severity || '').toLowerCase();
+    return severity === 'critical' || type.includes('conflict') || type.includes('runway') || type.includes('emergency');
+  });
+}
+
+function summarizeAction(actions) {
+  if (!Array.isArray(actions) || !actions.length) return 'no_op';
+  const first = actions[0] || {};
+  const type = first.type || 'unknown';
+  const target = first.aircraft ? `(${first.aircraft})` : '';
+  return `${type}${target}${actions.length > 1 ? ` +${actions.length - 1}` : ''}`;
 }
 
 function fmtJson(v) {
