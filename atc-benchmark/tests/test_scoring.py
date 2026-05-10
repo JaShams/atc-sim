@@ -1,8 +1,6 @@
-from pathlib import Path
-
-from atc_benchmark.paths import resolve_scenario_path, scenarios_dir
 
 from atc_benchmark.agents.heuristic_agent import HeuristicAgent
+from atc_benchmark.paths import resolve_scenario_path
 from atc_benchmark.simulator.engine import load_world, run
 from atc_benchmark.simulator.models import Aircraft, AirportState, RulesConfig, Weather, WorldState
 

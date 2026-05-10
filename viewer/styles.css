@@ -12,6 +12,9 @@ h1 { margin: 0 0 12px; font-size: 1.4rem; }
 #radar { width: 100%; border: 1px solid #888; background: #081018; border-radius: 6px; }
 .timeline-row { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
 #tickSlider { flex: 1; }
+button, select { min-height: 32px; border: 1px solid #9aa4b2; border-radius: 6px; background: #fff; color: #111; }
+button { min-width: 38px; padding: 0 10px; cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: 0.5; }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 ul { margin: 0; padding-left: 18px; }
 .legend { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }

@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-
 ALLOWED_ACTION_TYPES = {
     "assign_heading",
     "assign_altitude",
@@ -30,6 +29,7 @@ class Aircraft:
     status: str = "airborne"
     target_runway: str | None = None
     clearance: str | None = None
+    target_altitude_ft: float | None = None
     emergency: bool = False
     ready_time_sec: int | None = None
     takeoff_time_sec: int | None = None

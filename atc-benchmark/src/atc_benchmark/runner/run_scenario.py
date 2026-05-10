@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import platform
+import subprocess
+import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from atc_benchmark import __version__
-from atc_benchmark.paths import resolve_scenario_path
 from atc_benchmark.agents.heuristic_agent import HeuristicAgent
 from atc_benchmark.agents.llm_agent import LLMAgent
 from atc_benchmark.agents.noop_agent import NoOpAgent
 from atc_benchmark.agents.random_valid_action_agent import RandomValidActionAgent
+from atc_benchmark.paths import resolve_scenario_path
 from atc_benchmark.simulator.engine import load_world, run, scenario_hash
 
 
@@ -30,19 +34,60 @@ def build_agent(name: str):
     raise ValueError(f"unknown agent: {name}")
 
 
+def _git_metadata(scenario: Path) -> dict[str, object]:
+    root = scenario.resolve().parents[1]
+    metadata: dict[str, object] = {"git_commit": None, "git_dirty": None, "git_metadata_error": None}
+    try:
+        commit = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        status = subprocess.run(
+            ["git", "-C", str(root), "status", "--porcelain"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except Exception as exc:  # noqa: BLE001
+        metadata["git_metadata_error"] = str(exc)
+    else:
+        metadata["git_commit"] = commit.stdout.strip()
+        metadata["git_dirty"] = bool(status.stdout.strip())
+    return metadata
+
+
+def agent_config(agent_name: str) -> dict[str, object]:
+    config: dict[str, object] = {"name": agent_name}
+    if agent_name == "random":
+        config["seed"] = 0
+    if agent_name == "llm":
+        config["client"] = "stub"
+    return config
+
+
 def build_manifest(scenario: Path, world, agent_name: str, max_ticks: int) -> dict:
     scenario_doc = json.loads(scenario.read_text())
-    return {
+    manifest = {
         "scenario_file": scenario.name,
         "scenario_hash": scenario_hash(scenario),
         "agent_name": agent_name,
+        "agent_config": agent_config(agent_name),
         "max_ticks": max_ticks,
         "tick_sec": world.tick_sec,
         "rules_config": world.rules.__dict__.copy(),
         "scoring_config": world.scoring.__dict__.copy(),
         "package": {"name": "atc-benchmark", "version": __version__},
+        "runtime": {
+            "python_version": sys.version,
+            "platform": platform.platform(),
+            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        },
         "scenario_metadata": scenario_doc.get("scenario_metadata", {}),
     }
+    manifest.update(_git_metadata(scenario))
+    return manifest
 
 
 def main() -> None:

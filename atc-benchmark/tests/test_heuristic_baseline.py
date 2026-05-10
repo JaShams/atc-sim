@@ -1,12 +1,9 @@
-from pathlib import Path
-
-from atc_benchmark.paths import resolve_scenario_path, scenarios_dir
 
 from atc_benchmark.agents.heuristic_agent import HeuristicAgent
 from atc_benchmark.agents.noop_agent import NoOpAgent
 from atc_benchmark.agents.random_valid_action_agent import RandomValidActionAgent
+from atc_benchmark.paths import scenarios_dir
 from atc_benchmark.simulator.engine import load_world, run
-
 
 KEY_SCENARIOS = [
     "departure_between_arrivals_001.json",

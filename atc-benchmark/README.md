@@ -19,8 +19,10 @@
 ## Run
 
 ```bash
-pip install -e .
+pip install -e ".[dev]"
+atc-validate scenarios
 atc-run scenarios/crossing_conflict_001.json
+atc-batch --agents heuristic,noop,random
 pytest
 ```
 

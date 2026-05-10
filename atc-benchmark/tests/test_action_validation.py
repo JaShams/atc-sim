@@ -1,8 +1,6 @@
-from pathlib import Path
 
-from atc_benchmark.paths import resolve_scenario_path, scenarios_dir
-
-from atc_benchmark.simulator.engine import load_world
+from atc_benchmark.paths import resolve_scenario_path
+from atc_benchmark.simulator.engine import advance, apply_actions, load_world
 from atc_benchmark.simulator.models import ALLOWED_ACTION_TYPES
 from atc_benchmark.simulator.validator import validate_actions
 
@@ -108,3 +106,30 @@ def test_every_allowed_action_is_applied_or_explicitly_rejected():
             continue
         assert invalid
         assert invalid[0]["reason"]
+
+
+def test_assign_altitude_levels_at_target():
+    world = load_world(resolve_scenario_path("scenarios/crossing_conflict_001.json"))
+    ac = world.aircraft["ARR1"]
+    ac.altitude_ft = 1000
+    apply_actions(world, [{"aircraft": "ARR1", "type": "assign_altitude", "altitude_ft": 1125}])
+    assert ac.target_altitude_ft == 1125
+    advance(world)
+    assert ac.altitude_ft == 1125
+    assert ac.vertical_rate_fpm == 0
+    assert ac.target_altitude_ft is None
+
+
+def test_landing_clearance_requires_active_runway_alignment():
+    world = load_world(resolve_scenario_path("scenarios/crossing_conflict_001.json"))
+    arr = world.aircraft["ARR1"]
+    arr.target_runway = world.airport.active_runway
+    arr.x_nm = -8
+    arr.y_nm = 3.5
+    arr.heading_deg = 90
+    _, invalid = validate_actions(world, [{"aircraft": "ARR1", "type": "clear_to_land"}])
+    assert invalid and invalid[0]["reason"] == "not_aligned_with_active_runway"
+
+    arr.y_nm = 0
+    _, invalid = validate_actions(world, [{"aircraft": "ARR1", "type": "clear_to_land"}])
+    assert not invalid

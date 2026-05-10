@@ -1,7 +1,5 @@
-from pathlib import Path
 
-from atc_benchmark.paths import resolve_scenario_path, scenarios_dir
-
+from atc_benchmark.paths import resolve_scenario_path
 from atc_benchmark.simulator.conflict_detection import detect_conflicts, predict_conflicts
 from atc_benchmark.simulator.engine import load_world
 

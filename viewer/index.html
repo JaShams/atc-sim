@@ -18,9 +18,18 @@
     <section class="panel">
       <canvas id="radar" width="900" height="560"></canvas>
       <div class="timeline-row">
+        <button id="stepBack" type="button" disabled aria-label="Previous tick">&lt;</button>
+        <button id="playPause" type="button" disabled>Play</button>
+        <button id="stepForward" type="button" disabled aria-label="Next tick">&gt;</button>
         <label for="tickSlider">Tick</label>
         <input id="tickSlider" type="range" min="0" max="0" value="0" disabled />
         <span id="tickLabel">0 / 0</span>
+        <label for="playSpeed">Speed</label>
+        <select id="playSpeed">
+          <option value="1000">1x</option>
+          <option value="500">2x</option>
+          <option value="250">4x</option>
+        </select>
       </div>
     </section>
 
