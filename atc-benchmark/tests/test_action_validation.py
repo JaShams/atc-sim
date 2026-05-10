@@ -28,7 +28,7 @@ def test_landing_clearance_requires_arrival_state():
 def test_clearance_rejected_during_projected_runway_occupancy_window():
     world = load_world(Path("scenarios/crossing_conflict_001.json"))
     world.airport.runway_occupied_by = "ARR1"
-    world.airport.occupied_until_sec = world.time_sec + 20
+    world.airport.runway_occupied_until_sec = world.time_sec + 20
     _, invalid = validate_actions(world, [{"aircraft": "DEP1", "type": "clear_for_takeoff"}])
     assert invalid and invalid[0]["reason"] == "runway_occupied"
 
@@ -41,3 +41,28 @@ def test_second_runway_clearance_in_same_tick_rejected():
     ]
     _, invalid = validate_actions(world, actions)
     assert invalid and invalid[0]["reason"] == "runway_occupied"
+
+
+def test_consecutive_arrivals_second_clearance_rejected_by_predicted_occupancy_window():
+    world = load_world(Path("scenarios/two_arrivals_one_runway_001.json"))
+    actions = [
+        {"aircraft": "ARR1", "type": "clear_to_land"},
+        {"aircraft": "ARR2", "type": "clear_to_land"},
+    ]
+    _, invalid = validate_actions(world, actions)
+    assert invalid and invalid[0]["reason"] == "runway_occupied"
+
+
+def test_departure_insertion_between_arrivals_rejected_by_predicted_occupancy_window():
+    world = load_world(Path("scenarios/departure_between_arrivals_001.json"))
+    world.aircraft["ARR1"].x_nm = -8.0
+    world.aircraft["ARR1"].y_nm = 0.0
+    world.aircraft["ARR1"].heading_deg = 90
+    actions = [
+        {"aircraft": "ARR1", "type": "clear_to_land"},
+        {"aircraft": "DEP1", "type": "clear_for_takeoff"},
+        {"aircraft": "ARR2", "type": "clear_to_land"},
+    ]
+    _, invalid = validate_actions(world, actions)
+    assert len(invalid) == 2
+    assert all(item["reason"] == "runway_occupied" for item in invalid)

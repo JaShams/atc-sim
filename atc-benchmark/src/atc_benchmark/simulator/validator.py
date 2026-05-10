@@ -4,6 +4,9 @@ from math import cos, hypot, radians, sin
 
 from .models import ALLOWED_ACTION_TYPES, WorldState
 
+TAKEOFF_RUNWAY_OCCUPANCY_SEC = 35
+LANDING_RUNWAY_OCCUPANCY_SEC = 50
+
 
 def _runway_heading_deg(active_runway: str) -> float:
     return (int(active_runway) % 36) * 10
@@ -26,8 +29,10 @@ def _closest_inbound_arrival_final_distance(world: WorldState) -> float | None:
 def validate_actions(world: WorldState, actions: list[dict]) -> tuple[list[dict], list[dict]]:
     valid, invalid = [], []
     seen: set[str] = set()
-    projected_runway_release_sec = world.airport.occupied_until_sec if world.airport.runway_occupied_by else None
     projected_time = world.time_sec
+    projected_runway_release_sec = world.airport.runway_occupied_until_sec
+    if world.airport.runway_occupied_by and projected_runway_release_sec is None:
+        projected_runway_release_sec = projected_time + world.tick_sec
     for action in actions:
         cs = action.get("aircraft")
         atype = action.get("type")
@@ -67,6 +72,8 @@ def validate_actions(world: WorldState, actions: list[dict]) -> tuple[list[dict]
         else:
             valid.append(action)
             seen.add(cs)
-            if atype in {"clear_to_land", "clear_for_takeoff"}:
-                projected_runway_release_sec = projected_time + world.tick_sec
+            if atype == "clear_to_land":
+                projected_runway_release_sec = max(projected_runway_release_sec or projected_time, projected_time) + LANDING_RUNWAY_OCCUPANCY_SEC
+            elif atype == "clear_for_takeoff":
+                projected_runway_release_sec = max(projected_runway_release_sec or projected_time, projected_time) + TAKEOFF_RUNWAY_OCCUPANCY_SEC
     return valid, invalid

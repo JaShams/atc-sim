@@ -49,7 +49,7 @@ def advance(world: WorldState) -> None:
                 ac.landing_time_sec = world.time_sec + world.tick_sec
                 world.airport.runway_occupied_by = ac.callsign
                 world.airport.runway_phase = "vacating"
-                world.airport.occupied_until_sec = world.time_sec + world.tick_sec + LANDING_RUNWAY_OCCUPANCY_SEC
+                world.airport.runway_occupied_until_sec = world.time_sec + world.tick_sec + LANDING_RUNWAY_OCCUPANCY_SEC
             if ac.status == "rolling":
                 ac.status = "airborne_departure"
                 ac.takeoff_time_sec = world.time_sec + world.tick_sec
@@ -79,7 +79,7 @@ def apply_actions(world: WorldState, actions: list[dict]) -> dict:
                 ac.ready_time_sec = world.time_sec
             world.airport.runway_occupied_by = ac.callsign
             world.airport.runway_phase = "takeoff_roll"
-            world.airport.occupied_until_sec = world.time_sec + TAKEOFF_RUNWAY_OCCUPANCY_SEC
+            world.airport.runway_occupied_until_sec = world.time_sec + TAKEOFF_RUNWAY_OCCUPANCY_SEC
             if ac.callsign in world.airport.departure_queue:
                 world.airport.departure_queue.remove(ac.callsign)
         elif t == "go_around":
@@ -225,10 +225,10 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
                 break
             advance(world)
             world.time_sec += world.tick_sec
-            if world.airport.runway_occupied_by and world.airport.occupied_until_sec is not None and world.time_sec >= world.airport.occupied_until_sec:
+            if world.airport.runway_occupied_until_sec is not None and world.time_sec >= world.airport.runway_occupied_until_sec:
                 world.airport.runway_occupied_by = None
                 world.airport.runway_phase = None
-                world.airport.occupied_until_sec = None
+                world.airport.runway_occupied_until_sec = None
 
     for state in conflict_lifecycle_state.values():
         events = state["events"]
