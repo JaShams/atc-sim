@@ -53,6 +53,12 @@ class TickOutcome:
     kind: str = OutcomeKind.UNKNOWN.value
     metric: str = ""
     value: float | int | str | None = None
+    immediate_delta: float | None = None
+    window_delta: float | None = None
+    normalization_value: float | None = None
+    epsilon_immediate: float | None = None
+    epsilon_window: float | None = None
+    horizon_ticks: int | None = None
 
 
 @dataclass

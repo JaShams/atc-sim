@@ -215,6 +215,8 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
         ScoreComponentId.EMERGENCY_PRIORITY_COMPLIANCE: 0.0,
     }
 
+    tick_records: list[dict] = []
+
     with trace_path.open("w", encoding="utf-8") as f:
         for tick_id in range(max_ticks):
             triggered_events = apply_events(world)
@@ -303,11 +305,8 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
             }
             score_after = sum(cumulative_score_components.values())
             score_diff = score_after - score_before
-            outcome_kind = OutcomeKind.NEUTRAL
-            if score_diff > 0:
-                outcome_kind = OutcomeKind.HELPED
-            elif score_diff < 0:
-                outcome_kind = OutcomeKind.HURT
+            normalization_value = max(abs(world.scoring.base_score), world.rules.outcome_normalization_floor)
+            normalized_immediate_delta = score_diff / normalization_value
 
             explanation = TickExplanation(
                 tick_id=tick_id,
@@ -321,26 +320,35 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
                 ),
                 action_chosen=actions or [],
                 alternatives_considered=[RankedAlternative(rank=1, action={"type": "no_op"}, score=None)],
-                outcome=TickOutcome(kind=outcome_kind.value, metric="tick_score_delta", value=score_diff),
+                outcome=TickOutcome(
+                    kind=OutcomeKind.UNKNOWN.value,
+                    metric="normalized_tick_score_delta",
+                    value=normalized_immediate_delta,
+                    immediate_delta=normalized_immediate_delta,
+                    normalization_value=normalization_value,
+                    epsilon_immediate=world.rules.outcome_immediate_epsilon,
+                    epsilon_window=world.rules.outcome_window_epsilon,
+                    horizon_ticks=world.rules.outcome_horizon_ticks,
+                ),
                 score_before=score_before,
                 score_after=score_after,
                 score_delta_by_component=delta_by_component,
             )
-
-            event = {
-                "time": world.time_sec,
-                "triggered_events": triggered_events,
-                "decision_points": dps,
-                "observation": obs,
-                "agent_exception": agent_exception,
-                "actions": actions,
-                "invalid_actions": invalid,
-                "conflicts": conflicts,
-                "predicted_conflicts": predictions,
-                "state": world.snapshot(),
-                "tick_explanation": tick_explanation_to_dict(explanation),
-            }
-            f.write(json.dumps(event) + "\n")
+            tick_records.append(
+                {
+                    "time": world.time_sec,
+                    "triggered_events": triggered_events,
+                    "decision_points": dps,
+                    "observation": obs,
+                    "agent_exception": agent_exception,
+                    "actions": actions,
+                    "invalid_actions": invalid,
+                    "conflicts": conflicts,
+                    "predicted_conflicts": predictions,
+                    "state": world.snapshot(),
+                    "tick_explanation_obj": explanation,
+                }
+            )
 
             if world.airport.runway_occupied_by and all(a.status in {"landed", "exited_airspace"} for a in world.aircraft.values()):
                 break
@@ -350,6 +358,34 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
                 world.airport.runway_occupied_by = None
                 world.airport.runway_phase = None
                 world.airport.runway_occupied_until_sec = None
+
+    for idx, tick_record in enumerate(tick_records):
+        explanation = tick_record["tick_explanation_obj"]
+        horizon_idx = min(idx + world.rules.outcome_horizon_ticks, len(tick_records) - 1)
+        window_delta = tick_records[horizon_idx]["tick_explanation_obj"].score_after - explanation.score_before
+        normalization_value = explanation.outcome.normalization_value or 1.0
+        normalized_window_delta = window_delta / normalization_value
+        explanation.outcome.window_delta = normalized_window_delta
+
+        immediate = explanation.outcome.immediate_delta or 0.0
+        if abs(immediate) <= world.rules.outcome_immediate_epsilon and abs(normalized_window_delta) <= world.rules.outcome_window_epsilon:
+            explanation.outcome.kind = OutcomeKind.NEUTRAL.value
+        elif normalized_window_delta > world.rules.outcome_window_epsilon:
+            explanation.outcome.kind = OutcomeKind.HELPED.value
+        elif normalized_window_delta < -world.rules.outcome_window_epsilon:
+            explanation.outcome.kind = OutcomeKind.HURT.value
+        elif immediate > world.rules.outcome_immediate_epsilon:
+            explanation.outcome.kind = OutcomeKind.HELPED.value
+        elif immediate < -world.rules.outcome_immediate_epsilon:
+            explanation.outcome.kind = OutcomeKind.HURT.value
+        else:
+            explanation.outcome.kind = OutcomeKind.NEUTRAL.value
+
+    with trace_path.open("w", encoding="utf-8") as f:
+        for tick_record in tick_records:
+            explanation = tick_record.pop("tick_explanation_obj")
+            event = {**tick_record, "tick_explanation": tick_explanation_to_dict(explanation)}
+            f.write(json.dumps(event) + "\n")
 
     for state in conflict_lifecycle_state.values():
         total_conflict_time_gained_sec += state["last_predicted_time_sec"] - state["first_predicted_time_sec"]
