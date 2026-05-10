@@ -132,8 +132,10 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
     conflict_time_gain_samples = 0
     go_around_count = 0
     latest_wind_change_sec: int | None = None
-    wind_change_response_latency_sec: int | None = None
+    wind_response_latency_sec: int | None = None
     unsafe_clearances_after_wind_change = 0
+    emergency_priority_compliant_count = 0
+    emergency_priority_violation_count = 0
     active_conflicts_count_total = 0
     predicted_conflicts_count_total = 0
     conflict_lifecycle_state: dict[str, dict] = {}
@@ -187,7 +189,7 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
             for event in triggered_events:
                 if event.get("type") == "wind_change":
                     latest_wind_change_sec = world.time_sec
-                    wind_change_response_latency_sec = None
+                    wind_response_latency_sec = None
             conflicts = detect_conflicts(world)
             if conflicts:
                 loss_sep_count += len(conflicts)
@@ -212,6 +214,23 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
                 raw_actions, malformed = extract_actions(agent.act(obs))
                 actions = raw_actions
                 instructions += len(actions)
+                emergency_active = any(
+                    ac.role == "arrival" and ac.emergency and ac.status != "landed" for ac in world.aircraft.values()
+                )
+                if emergency_active:
+                    emergency_callsigns = {
+                        ac.callsign for ac in world.aircraft.values() if ac.role == "arrival" and ac.emergency and ac.status != "landed"
+                    }
+                    for action in actions:
+                        if not isinstance(action, dict):
+                            continue
+                        if action.get("type") == "clear_for_takeoff":
+                            emergency_priority_violation_count += 1
+                        elif action.get("type") == "clear_to_land":
+                            if action.get("aircraft") in emergency_callsigns:
+                                emergency_priority_compliant_count += 1
+                            else:
+                                emergency_priority_violation_count += 1
                 valid, invalid = validate_actions(world, actions)
                 invalid = malformed + invalid
                 malformed_agent_outputs_count += len(malformed)
@@ -224,8 +243,8 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
                 after_predictions = predict_conflicts(world)
                 _update_lifecycle(after_predictions, is_action_phase=True)
 
-            if latest_wind_change_sec is not None and wind_change_response_latency_sec is None and _runway_is_wind_compliant(world):
-                wind_change_response_latency_sec = world.time_sec - latest_wind_change_sec
+            if latest_wind_change_sec is not None and wind_response_latency_sec is None and _runway_is_wind_compliant(world):
+                wind_response_latency_sec = world.time_sec - latest_wind_change_sec
 
             event = {
                 "time": world.time_sec,
@@ -283,6 +302,10 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
         "successful_departure": departures_ok * scoring.successful_departure_reward,
         "emergency_handled": emergency_handled_count * scoring.emergency_handled_reward,
         "emergency_unhandled": emergency_unhandled_count * scoring.emergency_unhandled_penalty,
+        "emergency_priority_compliance": (
+            emergency_priority_compliant_count * scoring.emergency_priority_compliance_reward
+            + emergency_priority_violation_count * scoring.emergency_priority_violation_penalty
+        ),
     }
     raw_score = sum(score_breakdown.values())
     score = max(0.0, raw_score)
@@ -308,9 +331,12 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
             "go_around_count": go_around_count,
             "emergency_handled_count": emergency_handled_count,
             "emergency_unhandled_count": emergency_unhandled_count,
-            "wind_change_response_latency_sec": wind_change_response_latency_sec,
+            "wind_response_latency_sec": wind_response_latency_sec,
+            "wind_change_response_latency_sec": wind_response_latency_sec,
             "unsafe_clearances_after_wind_change": unsafe_clearances_after_wind_change,
             "runway_unsafe_clearance_count": unsafe_clearances_after_wind_change,
+            "emergency_priority_compliant_count": emergency_priority_compliant_count,
+            "emergency_priority_violation_count": emergency_priority_violation_count,
             "malformed_agent_outputs_count": malformed_agent_outputs_count,
             "active_conflicts_count_total": active_conflicts_count_total,
             "predicted_conflicts_count_total": predicted_conflicts_count_total,

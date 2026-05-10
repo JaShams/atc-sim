@@ -1,0 +1,13 @@
+{
+  "tick_sec": 5,
+  "airport": {"runway_id": "27", "active_runway": "27", "runway_occupied_by": "TRAF1", "runway_phase": "takeoff_roll", "runway_occupied_until_sec": 25, "departure_queue": ["DEP2"]},
+  "rules": {"lookahead_seconds": 75},
+  "events": [
+    {"time_sec": 5, "type": "emergency_declare", "aircraft": "ARR_EMG"}
+  ],
+  "aircraft": [
+    {"callsign": "ARR_EMG", "role": "arrival", "x_nm": -4.0, "y_nm": 0.0, "altitude_ft": 1200, "speed_kt": 160, "heading_deg": 90, "status": "on_final", "target_runway": "27"},
+    {"callsign": "TRAF1", "role": "departure", "x_nm": 0, "y_nm": 0, "altitude_ft": 0, "speed_kt": 30, "heading_deg": 270, "status": "rolling", "target_runway": "27"},
+    {"callsign": "DEP2", "role": "departure", "x_nm": 0, "y_nm": 0, "altitude_ft": 0, "speed_kt": 0, "heading_deg": 270, "status": "waiting_departure", "target_runway": "27"}
+  ]
+}
