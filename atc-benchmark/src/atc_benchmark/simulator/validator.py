@@ -26,6 +26,8 @@ def _closest_inbound_arrival_final_distance(world: WorldState) -> float | None:
 def validate_actions(world: WorldState, actions: list[dict]) -> tuple[list[dict], list[dict]]:
     valid, invalid = [], []
     seen: set[str] = set()
+    projected_runway_release_sec = world.airport.occupied_until_sec if world.airport.runway_occupied_by else None
+    projected_time = world.time_sec
     for action in actions:
         cs = action.get("aircraft")
         atype = action.get("type")
@@ -44,13 +46,13 @@ def validate_actions(world: WorldState, actions: list[dict]) -> tuple[list[dict]
                 reason = "invalid_altitude"
             elif atype == "assign_speed" and not (world.rules.min_speed_kt <= action.get("speed_kt", -1) <= world.rules.max_speed_kt):
                 reason = "invalid_speed"
-            elif atype == "clear_to_land" and world.airport.runway_occupied_by:
+            elif atype == "clear_to_land" and projected_runway_release_sec is not None and projected_runway_release_sec > projected_time:
                 reason = "runway_occupied"
             elif atype == "clear_to_land" and ac.role != "arrival":
                 reason = "not_arrival"
             elif atype == "clear_to_land" and ac.status not in {"airborne", "on_final"}:
                 reason = "not_on_final_or_arrival"
-            elif atype == "clear_for_takeoff" and world.airport.runway_occupied_by:
+            elif atype == "clear_for_takeoff" and projected_runway_release_sec is not None and projected_runway_release_sec > projected_time:
                 reason = "runway_occupied"
             elif atype == "clear_for_takeoff" and cs not in world.airport.departure_queue:
                 reason = "not_in_departure_queue"
@@ -65,4 +67,6 @@ def validate_actions(world: WorldState, actions: list[dict]) -> tuple[list[dict]
         else:
             valid.append(action)
             seen.add(cs)
+            if atype in {"clear_to_land", "clear_for_takeoff"}:
+                projected_runway_release_sec = projected_time + world.tick_sec
     return valid, invalid
