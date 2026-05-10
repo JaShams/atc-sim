@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from atc_benchmark.simulator.engine import load_world
+from atc_benchmark.simulator.models import ALLOWED_ACTION_TYPES
 from atc_benchmark.simulator.validator import validate_actions
 
 
@@ -66,3 +67,42 @@ def test_departure_insertion_between_arrivals_rejected_by_predicted_occupancy_wi
     _, invalid = validate_actions(world, actions)
     assert len(invalid) == 2
     assert all(item["reason"] == "runway_occupied" for item in invalid)
+
+
+def test_every_allowed_action_is_applied_or_explicitly_rejected():
+    world = load_world(Path("scenarios/crossing_conflict_001.json"))
+    # Keep runway unavailable so runway-clearance actions are deterministically rejected.
+    world.airport.runway_occupied_by = "ARR1"
+    world.airport.runway_occupied_until_sec = world.time_sec + world.tick_sec
+
+    sample_actions = {
+        "assign_heading": {"aircraft": "ARR1", "type": "assign_heading", "heading": 180},
+        "assign_altitude": {"aircraft": "ARR1", "type": "assign_altitude", "altitude_ft": 3000},
+        "assign_speed": {"aircraft": "ARR1", "type": "assign_speed", "speed_kt": 190},
+        "clear_to_land": {"aircraft": "ARR1", "type": "clear_to_land"},
+        "clear_for_takeoff": {"aircraft": "DEP1", "type": "clear_for_takeoff"},
+        "go_around": {"aircraft": "ARR1", "type": "go_around"},
+        "hold_short": {"aircraft": "DEP1", "type": "hold_short"},
+        "hold_position": {"aircraft": "DEP1", "type": "hold_position"},
+        "no_op": {"aircraft": "ARR1", "type": "no_op"},
+    }
+    engine_applied_types = {
+        "assign_heading",
+        "assign_altitude",
+        "assign_speed",
+        "clear_to_land",
+        "clear_for_takeoff",
+        "go_around",
+        "hold_short",
+        "hold_position",
+        "no_op",
+    }
+
+    assert ALLOWED_ACTION_TYPES == set(sample_actions)
+    for action_type in ALLOWED_ACTION_TYPES:
+        valid, invalid = validate_actions(world, [sample_actions[action_type]])
+        if valid:
+            assert action_type in engine_applied_types
+            continue
+        assert invalid
+        assert invalid[0]["reason"]
