@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from math import cos, hypot, radians, sin
+from math import cos, radians, sin
 
 from .models import ALLOWED_ACTION_TYPES, WorldState
 
@@ -10,6 +10,10 @@ LANDING_RUNWAY_OCCUPANCY_SEC = 50
 
 def _runway_heading_deg(active_runway: str) -> float:
     return (int(active_runway) % 36) * 10
+
+
+def _angle_delta_deg(a: float, b: float) -> float:
+    return abs((a - b + 180) % 360 - 180)
 
 
 def _closest_inbound_arrival_final_distance(world: WorldState) -> float | None:
@@ -26,6 +30,20 @@ def _closest_inbound_arrival_final_distance(world: WorldState) -> float | None:
     return min(dists) if dists else None
 
 
+def _is_aligned_for_active_runway(world: WorldState, aircraft) -> bool:
+    if aircraft.target_runway is not None and aircraft.target_runway != world.airport.active_runway:
+        return False
+    for final_heading in (_runway_heading_deg(world.airport.active_runway), (_runway_heading_deg(world.airport.active_runway) + 180) % 360):
+        heading_delta = _angle_delta_deg(aircraft.heading_deg, final_heading)
+        rw_rad = radians(final_heading)
+        ux, uy = sin(rw_rad), cos(rw_rad)
+        along_final_nm = -(aircraft.x_nm * ux + aircraft.y_nm * uy)
+        cross_track_nm = abs(aircraft.x_nm * uy - aircraft.y_nm * ux)
+        if heading_delta <= 35 and 0 <= along_final_nm <= 15 and cross_track_nm <= 3:
+            return True
+    return False
+
+
 def validate_actions(world: WorldState, actions: list[dict]) -> tuple[list[dict], list[dict]]:
     valid, invalid = [], []
     seen: set[str] = set()
@@ -37,14 +55,16 @@ def validate_actions(world: WorldState, actions: list[dict]) -> tuple[list[dict]
         cs = action.get("aircraft")
         atype = action.get("type")
         reason = None
-        if cs not in world.aircraft:
+        if not isinstance(cs, str) or cs not in world.aircraft:
             reason = "unknown_aircraft"
         elif atype not in ALLOWED_ACTION_TYPES:
             reason = "invalid_action_type"
         elif cs in seen and atype != "no_op":
             reason = "contradictory_commands"
         else:
-            ac = world.aircraft[cs]
+            assert isinstance(cs, str)
+            callsign = cs
+            ac = world.aircraft[callsign]
             if atype == "assign_heading" and not (0 <= action.get("heading", -1) <= 359):
                 reason = "invalid_heading"
             elif atype == "assign_altitude" and action.get("altitude_ft", 0) < world.rules.min_altitude_ft:
@@ -57,6 +77,8 @@ def validate_actions(world: WorldState, actions: list[dict]) -> tuple[list[dict]
                 reason = "not_arrival"
             elif atype == "clear_to_land" and ac.status not in {"airborne", "on_final"}:
                 reason = "not_on_final_or_arrival"
+            elif atype == "clear_to_land" and not _is_aligned_for_active_runway(world, ac):
+                reason = "not_aligned_with_active_runway"
             elif atype == "clear_for_takeoff" and projected_runway_release_sec is not None and projected_runway_release_sec > projected_time:
                 reason = "runway_occupied"
             elif atype == "clear_for_takeoff" and cs not in world.airport.departure_queue:
@@ -71,6 +93,7 @@ def validate_actions(world: WorldState, actions: list[dict]) -> tuple[list[dict]
             invalid.append({"action": action, "reason": reason})
         else:
             valid.append(action)
+            assert isinstance(cs, str)
             seen.add(cs)
             if atype == "clear_to_land":
                 projected_runway_release_sec = max(projected_runway_release_sec or projected_time, projected_time) + LANDING_RUNWAY_OCCUPANCY_SEC

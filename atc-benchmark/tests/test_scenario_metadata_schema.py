@@ -1,7 +1,5 @@
-from pathlib import Path
 
-from atc_benchmark.paths import resolve_scenario_path, scenarios_dir
-
+from atc_benchmark.paths import scenarios_dir
 
 REQUIRED_TOP_LEVEL_KEYS = {"tags", "difficulty_tier", "intended_stressors", "expected_baseline_ranges"}
 ALLOWED_TAGS = {"safety", "efficiency", "event"}

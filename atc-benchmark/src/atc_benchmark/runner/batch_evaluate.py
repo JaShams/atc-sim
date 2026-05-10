@@ -15,23 +15,26 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--scenarios-dir", default="scenarios")
     parser.add_argument("--agent", choices=["heuristic", "noop", "random", "llm"], default="heuristic")
+    parser.add_argument("--agents", help="Comma-separated agents to compare, e.g. heuristic,noop,random")
     parser.add_argument("--output-dir", default="outputs/batch")
     parser.add_argument("--max-ticks", type=int, default=300)
     args = parser.parse_args()
 
+    agent_names = [name.strip() for name in args.agents.split(",") if name.strip()] if args.agents else [args.agent]
+    invalid_agents = sorted(set(agent_names) - {"heuristic", "noop", "random", "llm"})
+    if invalid_agents:
+        raise SystemExit(f"unknown agents: {', '.join(invalid_agents)}")
+
     scenarios_root = resolve_scenario_path(Path(args.scenarios_dir)) if args.scenarios_dir != "scenarios" else scenarios_dir()
     scenarios = sorted(scenarios_root.glob("*.json"))
     out = Path(args.output_dir)
-    score_dir = out / "scores"
-    trace_dir = out / "traces"
-    score_dir.mkdir(parents=True, exist_ok=True)
-    trace_dir.mkdir(parents=True, exist_ok=True)
+    out.mkdir(parents=True, exist_ok=True)
+    multi_agent = len(agent_names) > 1
 
     rows = []
     tag_counter: Counter[str] = Counter()
     tier_counter: Counter[str] = Counter()
     for scenario in scenarios:
-        world = load_world(scenario)
         scenario_doc = json.loads(scenario.read_text())
         metadata = scenario_doc.get("scenario_metadata", {})
         tags = metadata.get("tags", [])
@@ -39,12 +42,20 @@ def main() -> None:
         tag_counter.update(tags)
         if tier:
             tier_counter[tier] += 1
-        manifest = build_manifest(scenario, world, args.agent, args.max_ticks)
-        result = run(world, build_agent(args.agent), args.max_ticks, trace_dir / f"{scenario.stem}.jsonl", manifest=manifest)
-        (score_dir / f"{scenario.stem}.json").write_text(json.dumps(result, indent=2))
-        rows.append(
-            {
+        expected_ranges = metadata.get("expected_baseline_ranges", {})
+        for agent_name in agent_names:
+            world = load_world(scenario)
+            agent_root = out / agent_name if multi_agent else out
+            score_dir = agent_root / "scores"
+            trace_dir = agent_root / "traces"
+            score_dir.mkdir(parents=True, exist_ok=True)
+            trace_dir.mkdir(parents=True, exist_ok=True)
+            manifest = build_manifest(scenario, world, agent_name, args.max_ticks)
+            result = run(world, build_agent(agent_name), args.max_ticks, trace_dir / f"{scenario.stem}.jsonl", manifest=manifest)
+            (score_dir / f"{scenario.stem}.json").write_text(json.dumps(result, indent=2))
+            row = {
                 "scenario": scenario.name,
+                "agent": agent_name,
                 "score": result["score"],
                 "invalid_commands": result["control_quality"]["invalid_commands"],
                 "active_conflicts_count_total": result["metrics"]["active_conflicts_count_total"],
@@ -55,10 +66,12 @@ def main() -> None:
                 "tags": tags,
                 "difficulty_tier": tier,
             }
-        )
+            row["expected_baseline_pass"] = _expected_baseline_pass(row, expected_ranges)
+            rows.append(row)
 
     summary = {
-        "agent": args.agent,
+        "agent": args.agent if not multi_agent else None,
+        "agents": agent_names,
         "count": len(rows),
         "average_score": (sum(r["score"] for r in rows) / len(rows)) if rows else 0,
         "total_invalid_commands": sum(r["invalid_commands"] for r in rows),
@@ -76,6 +89,7 @@ def main() -> None:
             f,
             fieldnames=[
                 "scenario",
+                "agent",
                 "score",
                 "invalid_commands",
                 "active_conflicts_count_total",
@@ -83,12 +97,25 @@ def main() -> None:
                 "runway_unsafe_clearance_count",
                 "malformed_agent_outputs_count",
                 "throughput_ops_per_hour",
+                "expected_baseline_pass",
                 "tags",
                 "difficulty_tier",
             ],
         )
         writer.writeheader()
         writer.writerows(rows)
+
+
+def _expected_baseline_pass(row: dict, expected_ranges: dict) -> bool | None:
+    if not expected_ranges:
+        return None
+    for metric, bounds in expected_ranges.items():
+        if metric not in row or not isinstance(bounds, list) or len(bounds) != 2:
+            continue
+        lower, upper = bounds
+        if row[metric] < lower or row[metric] > upper:
+            return False
+    return True
 
 
 if __name__ == "__main__":

@@ -82,7 +82,7 @@ class LLMAgent:
         )
 
     @classmethod
-    def from_env(cls) -> "LLMAgent":
+    def from_env(cls) -> LLMAgent:
         mock = os.getenv("ATC_LLM_MOCK_RESPONSE")
         if mock is not None:
             return cls(client=MockLLMClient(mock))

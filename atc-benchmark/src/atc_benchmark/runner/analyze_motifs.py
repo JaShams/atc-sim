@@ -73,7 +73,12 @@ def summarize_motifs(trace_dir: Path, top_n: int = 10) -> dict:
             }
         )
 
-    motifs.sort(key=lambda m: (m["mean_impact"], -m["count"]))
+    def _sort_key(motif: dict) -> tuple[float, int]:
+        mean_impact = motif.get("mean_impact", 0.0)
+        count = motif.get("count", 0)
+        return (mean_impact if isinstance(mean_impact, int | float) else 0.0, -(count if isinstance(count, int) else 0))
+
+    motifs.sort(key=_sort_key)
     top = motifs[:top_n]
     return {"trace_dir": str(trace_dir), "motif_count": len(motifs), "top_motifs": top}
 

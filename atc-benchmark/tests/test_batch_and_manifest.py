@@ -1,8 +1,7 @@
 import json
 from pathlib import Path
 
-from atc_benchmark.paths import resolve_scenario_path, scenarios_dir
-
+from atc_benchmark.paths import resolve_scenario_path
 from atc_benchmark.runner.batch_evaluate import main as batch_main
 from atc_benchmark.runner.run_scenario import build_manifest
 from atc_benchmark.simulator.engine import load_world, run
@@ -69,3 +68,19 @@ def test_batch_evaluator_outputs(tmp_path, monkeypatch):
     assert "throughput_ops_per_hour" in summary["scenarios"][0]
     assert (out / "scores" / f"{first}.json").exists()
     assert (out / "traces" / f"{first}.jsonl").exists()
+
+
+def test_batch_evaluator_multi_agent_outputs(tmp_path, monkeypatch):
+    out = tmp_path / "batch_multi"
+    monkeypatch.chdir(Path(__file__).resolve().parents[1])
+    import sys
+
+    sys.argv = ["atc-batch", "--agents", "heuristic,noop,random", "--output-dir", str(out), "--max-ticks", "2"]
+    batch_main()
+    summary = json.loads((out / "summary.json").read_text())
+    assert summary["agents"] == ["heuristic", "noop", "random"]
+    assert summary["count"] >= 3
+    assert "expected_baseline_pass" in summary["scenarios"][0]
+    for agent in ["heuristic", "noop", "random"]:
+        assert (out / agent / "scores").exists()
+        assert (out / agent / "traces").exists()

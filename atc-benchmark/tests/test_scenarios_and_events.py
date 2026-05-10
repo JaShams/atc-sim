@@ -1,8 +1,7 @@
 from pathlib import Path
 
-from atc_benchmark.paths import resolve_scenario_path, scenarios_dir
-
 from atc_benchmark.agents.base import Agent
+from atc_benchmark.paths import resolve_scenario_path, scenarios_dir
 from atc_benchmark.simulator.decision_points import detect_decision_points
 from atc_benchmark.simulator.engine import apply_events, load_world, run
 
