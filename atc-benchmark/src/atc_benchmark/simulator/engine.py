@@ -150,6 +150,7 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
     }
 
     def _update_lifecycle(predictions: list[dict], *, is_action_phase: bool) -> None:
+        nonlocal secondary_conflicts_created_count
         current_pairs = {p["conflict_pair_id"]: p for p in predictions}
         active_pairs = {pair_id for pair_id, st in conflict_lifecycle_state.items() if st.get("active", False)}
 
@@ -164,6 +165,8 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
                     "events": ["introduced"],
                 }
                 lifecycle_transition_counts["introduced"] += 1
+                if is_action_phase:
+                    secondary_conflicts_created_count += 1
                 continue
 
             if not state["active"]:
@@ -277,7 +280,6 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
     conflict_introduced_count = lifecycle_transition_counts["introduced"]
     conflict_resolved_count = lifecycle_transition_counts["resolved"]
     conflict_reintroduced_count = lifecycle_transition_counts["reintroduced"]
-    secondary_conflicts_created_count = conflict_reintroduced_count
     conflicts_delayed_count = lifecycle_transition_counts["delayed"]
     conflicts_worsened_count = lifecycle_transition_counts["worsened"]
 
