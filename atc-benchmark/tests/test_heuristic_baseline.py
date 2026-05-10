@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from atc_benchmark.paths import resolve_scenario_path, scenarios_dir
+
 from atc_benchmark.agents.heuristic_agent import HeuristicAgent
 from atc_benchmark.agents.noop_agent import NoOpAgent
 from atc_benchmark.agents.random_valid_action_agent import RandomValidActionAgent
@@ -13,7 +15,7 @@ KEY_SCENARIOS = [
 
 
 def _run_score(scenario_name: str, agent, tmp_path) -> dict:
-    world = load_world(Path("scenarios") / scenario_name)
+    world = load_world(scenarios_dir() / scenario_name)
     return run(world, agent, max_ticks=60, trace_path=tmp_path / f"{scenario_name}-{agent.__class__.__name__}.jsonl")
 
 

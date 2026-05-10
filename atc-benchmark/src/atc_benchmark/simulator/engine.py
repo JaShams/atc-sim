@@ -5,6 +5,8 @@ import json
 import math
 from pathlib import Path
 
+from atc_benchmark.paths import resolve_scenario_path
+
 from .conflict_detection import detect_conflicts, predict_conflicts
 from .decision_points import detect_decision_points
 from atc_benchmark import __version__
@@ -353,6 +355,7 @@ def scenario_hash(path: Path) -> str:
 
 
 def load_world(path: Path) -> WorldState:
+    path = resolve_scenario_path(path)
     data = json.loads(path.read_text())
     ac = {a["callsign"]: Aircraft(**a) for a in data["aircraft"]}
     for aircraft in ac.values():

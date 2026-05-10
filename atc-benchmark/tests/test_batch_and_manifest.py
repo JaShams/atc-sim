@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+from atc_benchmark.paths import resolve_scenario_path, scenarios_dir
+
 from atc_benchmark.runner.batch_evaluate import main as batch_main
 from atc_benchmark.runner.run_scenario import build_manifest
 from atc_benchmark.simulator.engine import load_world, run
@@ -12,16 +14,16 @@ class BadAgent:
 
 
 def test_malformed_agent_output_becomes_invalid_command(tmp_path):
-    world = load_world(Path("scenarios/crossing_conflict_001.json"))
-    manifest = build_manifest(Path("scenarios/crossing_conflict_001.json"), world, "bad", 1)
+    world = load_world(resolve_scenario_path("scenarios/crossing_conflict_001.json"))
+    manifest = build_manifest(resolve_scenario_path("scenarios/crossing_conflict_001.json"), world, "bad", 1)
     result = run(world, BadAgent(), max_ticks=1, trace_path=tmp_path / "trace.jsonl", manifest=manifest)
     assert result["control_quality"]["invalid_commands"] >= 1
     assert result["metrics"]["malformed_agent_outputs_count"] >= 1
 
 
 def test_new_metric_fields_and_types(tmp_path):
-    world = load_world(Path("scenarios/crossing_conflict_001.json"))
-    manifest = build_manifest(Path("scenarios/crossing_conflict_001.json"), world, "noop", 2)
+    world = load_world(resolve_scenario_path("scenarios/crossing_conflict_001.json"))
+    manifest = build_manifest(resolve_scenario_path("scenarios/crossing_conflict_001.json"), world, "noop", 2)
     result = run(world, BadAgent(), max_ticks=1, trace_path=tmp_path / "trace.jsonl", manifest=manifest)
     metrics = result["metrics"]
     assert isinstance(metrics["active_conflicts_count_total"], int)
@@ -32,7 +34,7 @@ def test_new_metric_fields_and_types(tmp_path):
 
 
 def test_run_manifest_reproducible_fields(tmp_path):
-    scenario = Path("scenarios/crossing_conflict_001.json")
+    scenario = resolve_scenario_path("scenarios/crossing_conflict_001.json")
     world = load_world(scenario)
     manifest = build_manifest(scenario, world, "noop", 2)
     result = run(world, BadAgent(), max_ticks=1, trace_path=tmp_path / "trace.jsonl", manifest=manifest)
