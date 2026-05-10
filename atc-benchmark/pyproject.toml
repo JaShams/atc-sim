@@ -12,6 +12,7 @@ dependencies = []
 [project.scripts]
 atc-run = "atc_benchmark.runner.run_scenario:main"
 atc-batch = "atc_benchmark.runner.batch_evaluate:main"
+atc-motif = "atc_benchmark.runner.analyze_motifs:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
