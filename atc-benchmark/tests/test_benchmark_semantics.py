@@ -134,7 +134,7 @@ def test_takeoff_runway_occupancy_persists_until_timer_expires():
     dep = world.aircraft["DEP1"]
     apply_actions(world, [{"aircraft": "DEP1", "type": "clear_for_takeoff"}])
     assert world.airport.runway_occupied_by == dep.callsign
-    assert world.airport.occupied_until_sec is not None
+    assert world.airport.runway_occupied_until_sec is not None
     from atc_benchmark.simulator.engine import advance
 
     advance(world)
@@ -154,4 +154,12 @@ def test_landing_sets_vacating_phase_and_release_time():
     advance(world)
     assert world.airport.runway_occupied_by == "ARR1"
     assert world.airport.runway_phase == "vacating"
-    assert world.airport.occupied_until_sec is not None
+    assert world.airport.runway_occupied_until_sec is not None
+
+
+def test_runway_occupied_goaround_behavior_with_timed_occupancy(tmp_path):
+    world = load_world(Path("scenarios/runway_occupied_goaround_001.json"))
+    world.airport.runway_occupied_until_sec = world.time_sec + 20
+    result = run(world, ScriptedAgent([[{"aircraft": "ARR1", "type": "go_around"}]]), max_ticks=1, trace_path=tmp_path / "trace.jsonl")
+    assert result["metrics"]["go_around_count"] == 1
+    assert world.aircraft["ARR1"].status == "go_around"
