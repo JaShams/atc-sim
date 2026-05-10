@@ -66,6 +66,23 @@ class RulesConfig:
 
 
 @dataclass
+class ScoringConfig:
+    base_score: float = 100.0
+    loss_of_separation_penalty: float = -20.0
+    invalid_command_penalty: float = -5.0
+    secondary_conflicts_created_penalty: float = -4.0
+    conflicts_worsened_penalty: float = -3.0
+    conflicts_delayed_reward: float = 0.5
+    conflict_resolved_reward: float = 4.0
+    arrival_delay_sec_penalty: float = -0.02
+    departure_delay_sec_penalty: float = -0.02
+    successful_landing_reward: float = 3.0
+    successful_departure_reward: float = 2.0
+    emergency_handled_reward: float = 8.0
+    emergency_unhandled_penalty: float = -12.0
+
+
+@dataclass
 class WorldState:
     time_sec: int
     tick_sec: int
@@ -73,6 +90,7 @@ class WorldState:
     weather: Weather
     rules: RulesConfig
     aircraft: dict[str, Aircraft]
+    scoring: ScoringConfig = field(default_factory=ScoringConfig)
     events: list[dict] = field(default_factory=list)
 
     def snapshot(self) -> dict[str, Any]:
