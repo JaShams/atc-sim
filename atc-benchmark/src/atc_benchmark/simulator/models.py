@@ -81,6 +81,8 @@ class ScoringConfig:
     successful_departure_reward: float = 2.0
     emergency_handled_reward: float = 8.0
     emergency_unhandled_penalty: float = -12.0
+    emergency_priority_compliance_reward: float = 2.5
+    emergency_priority_violation_penalty: float = -4.0
 
 
 @dataclass
