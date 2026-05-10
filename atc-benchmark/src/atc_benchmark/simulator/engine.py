@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .conflict_detection import detect_conflicts, predict_conflicts
 from .decision_points import detect_decision_points
-from .models import Aircraft, AirportState, RulesConfig, Weather, WorldState
+from .models import Aircraft, AirportState, RulesConfig, ScoringConfig, Weather, WorldState
 from .validator import validate_actions
 
 
@@ -168,10 +168,28 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path) -> dict:
     arrival_delay = sum(max(0, (a.landing_time_sec or world.time_sec) - a.ideal_landing_time_sec) for a in arrivals if a.ideal_landing_time_sec is not None)
     departure_delay = sum(max(0, (a.takeoff_time_sec or world.time_sec) - a.ideal_takeoff_time_sec) for a in departures if a.ideal_takeoff_time_sec is not None)
     emergency_handled_count = sum(1 for a in arrivals if a.emergency and a.status == "landed")
-
-    score = max(0, 100 - loss_sep_count * 20 - invalid_count * 5 + landings * 3 + departures_ok * 2)
+    emergency_unhandled_count = sum(1 for a in arrivals if a.emergency and a.status != "landed")
+    scoring = world.scoring
+    score_breakdown = {
+        "base_score": scoring.base_score,
+        "loss_of_separation": loss_sep_count * scoring.loss_of_separation_penalty,
+        "invalid_command": invalid_count * scoring.invalid_command_penalty,
+        "secondary_conflicts_created": secondary_conflicts_created_count * scoring.secondary_conflicts_created_penalty,
+        "conflicts_worsened": conflicts_worsened_count * scoring.conflicts_worsened_penalty,
+        "conflicts_delayed": conflicts_delayed_count * scoring.conflicts_delayed_reward,
+        "conflict_resolved": conflict_resolved_count * scoring.conflict_resolved_reward,
+        "arrival_delay_sec": arrival_delay * scoring.arrival_delay_sec_penalty,
+        "departure_delay_sec": departure_delay * scoring.departure_delay_sec_penalty,
+        "successful_landing": landings * scoring.successful_landing_reward,
+        "successful_departure": departures_ok * scoring.successful_departure_reward,
+        "emergency_handled": emergency_handled_count * scoring.emergency_handled_reward,
+        "emergency_unhandled": emergency_unhandled_count * scoring.emergency_unhandled_penalty,
+    }
+    raw_score = sum(score_breakdown.values())
+    score = max(0.0, raw_score)
     return {
         "score": score,
+        "score_breakdown": score_breakdown,
         "safety": {"loss_of_separation": loss_sep_count, "min_horizontal_nm": min_h if min_h < float("inf") else None, "min_vertical_ft": min_v if min_v < float("inf") else None},
         "efficiency": {"successful_landings": landings, "successful_departures": departures_ok, "arrival_delay": arrival_delay, "departure_delay": departure_delay},
         "control_quality": {"instructions_issued": instructions, "invalid_commands": invalid_count},
@@ -186,6 +204,7 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path) -> dict:
             "secondary_conflicts_created_count": secondary_conflicts_created_count,
             "go_around_count": go_around_count,
             "emergency_handled_count": emergency_handled_count,
+            "emergency_unhandled_count": emergency_unhandled_count,
         },
     }
 
@@ -198,12 +217,14 @@ def load_world(path: Path) -> WorldState:
             aircraft.status = "airborne_departure"
         if aircraft.role == "departure" and aircraft.status == "waiting_departure" and aircraft.ready_time_sec is None:
             aircraft.ready_time_sec = 0
+    scoring_data = data.get("scoring", {})
     return WorldState(
         time_sec=0,
         tick_sec=data.get("tick_sec", 5),
         airport=AirportState(**data["airport"]),
         weather=Weather(**data.get("weather", {})),
         rules=RulesConfig(**data.get("rules", {})),
+        scoring=ScoringConfig(**scoring_data),
         aircraft=ac,
         events=data.get("events", []),
     )
