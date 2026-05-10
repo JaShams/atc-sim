@@ -9,5 +9,30 @@
     {"callsign": "ARR_EMG", "role": "arrival", "x_nm": -8.0, "y_nm": 0.0, "altitude_ft": 2600, "speed_kt": 210, "heading_deg": 90, "status": "airborne", "target_runway": "18"},
     {"callsign": "ARR2", "role": "arrival", "x_nm": -7.0, "y_nm": 0.5, "altitude_ft": 2550, "speed_kt": 205, "heading_deg": 90, "status": "airborne", "target_runway": "18"},
     {"callsign": "DEP1", "role": "departure", "x_nm": 0, "y_nm": 0, "altitude_ft": 0, "speed_kt": 0, "heading_deg": 180, "status": "waiting_departure", "target_runway": "18"}
-  ]
+  ],
+  "scenario_metadata": {
+    "tags": [
+      "safety",
+      "event"
+    ],
+    "difficulty_tier": "expert",
+    "intended_stressors": [
+      "simultaneous emergency and separation conflict",
+      "runway access prioritization"
+    ],
+    "expected_baseline_ranges": {
+      "score": [
+        45,
+        110
+      ],
+      "emergency_handled_count": [
+        0,
+        1
+      ],
+      "active_conflicts_count_total": [
+        0,
+        30
+      ]
+    }
+  }
 }
