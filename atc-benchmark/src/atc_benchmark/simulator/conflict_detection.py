@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from itertools import combinations
 from math import cos, hypot, radians, sin
 from typing import Any, Mapping
 
 from .models import WorldState
+from .spatial_index import SpatialHashIndex
 
 
 def horizontal_distance_nm(a, b) -> float:
@@ -141,10 +141,27 @@ def _pair_horizontal_minimum_nm(a, b, base_min_nm: float) -> float:
     return required
 
 
+
+
+def _candidate_pairs(aircraft: list, horizontal_gate_nm: float):
+    # Include possible extended wake minima (up to 7 NM) in candidate pruning radius.
+    search_gate_nm = max(horizontal_gate_nm, 7.0)
+    index = SpatialHashIndex(cell_size_nm=max(search_gate_nm, 0.1))
+    seen: set[tuple[str, str]] = set()
+    for ac in aircraft:
+        for other in index.query_neighbors(ac.x_nm, ac.y_nm):
+            key = tuple(sorted((ac.callsign, other.callsign)))
+            if key in seen:
+                continue
+            seen.add(key)
+            yield other, ac
+        index.insert(ac.x_nm, ac.y_nm, ac)
+
+
 def detect_conflicts(world: WorldState) -> list[dict]:
     conflicts: list[dict] = []
     ac_list = [a for a in world.aircraft.values() if a.status in {"airborne", "on_final", "go_around", "rolling", "airborne_departure"}]
-    for a, b in combinations(ac_list, 2):
+    for a, b in _candidate_pairs(ac_list, world.rules.min_horizontal_nm):
         h = horizontal_distance_nm(a, b)
         v = abs(a.altitude_ft - b.altitude_ft)
         min_horizontal_nm = _pair_horizontal_minimum_nm(a, b, world.rules.min_horizontal_nm)
@@ -171,10 +188,8 @@ def predict_conflicts(world: WorldState) -> list[dict]:
     predictions: list[dict] = []
     ac_list = [a for a in world.aircraft.values() if a.status in {"airborne", "on_final", "go_around", "rolling", "airborne_departure"}]
     step = max(world.tick_sec, 1)
-    for a, b in combinations(ac_list, 2):
-        first_conflict_time = None
-        first_h = None
-        first_v = None
+    candidate_pairs = list(_candidate_pairs(ac_list, world.rules.min_horizontal_nm))
+    for a, b in candidate_pairs:
         for t in range(step, world.rules.lookahead_seconds + step, step):
             ax, ay, aa = _project_aircraft(a, t, world.weather.wind_dir_deg, world.weather.wind_speed_kt)
             bx, by, ba = _project_aircraft(b, t, world.weather.wind_dir_deg, world.weather.wind_speed_kt)
@@ -184,24 +199,21 @@ def predict_conflicts(world: WorldState) -> list[dict]:
             if _established_on_parallel_ils(a, b, world):
                 min_horizontal_nm = 0.0
             if h < min_horizontal_nm and v < world.rules.min_vertical_ft:
-                first_conflict_time = t
-                first_h = h
-                first_v = v
+                abs_time = world.time_sec + t
+                pair_id = _conflict_pair_id(a.callsign, b.callsign)
+                predictions.append(
+                    {
+                        "type": "predicted_conflict",
+                        "id": f"{pair_id}|{abs_time}",
+                        "conflict_pair_id": pair_id,
+                        "conflict_instance_id": f"{pair_id}|{abs_time}",
+                        "aircraft": [a.callsign, b.callsign],
+                        "in_seconds": t,
+                        "predicted_time_sec": abs_time,
+                        "horizontal_nm": h,
+                        "required_horizontal_nm": min_horizontal_nm,
+                        "vertical_ft": v,
+                    }
+                )
                 break
-        if first_conflict_time is not None:
-            abs_time = world.time_sec + first_conflict_time
-            predictions.append(
-                {
-                    "type": "predicted_conflict",
-                    "id": f"{_conflict_pair_id(a.callsign, b.callsign)}|{abs_time}",
-                    "conflict_pair_id": _conflict_pair_id(a.callsign, b.callsign),
-                    "conflict_instance_id": f"{_conflict_pair_id(a.callsign, b.callsign)}|{abs_time}",
-                    "aircraft": [a.callsign, b.callsign],
-                    "in_seconds": first_conflict_time,
-                    "predicted_time_sec": abs_time,
-                    "horizontal_nm": first_h,
-                    "required_horizontal_nm": min_horizontal_nm,
-                    "vertical_ft": first_v,
-                }
-            )
     return predictions
