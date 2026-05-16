@@ -335,6 +335,14 @@ pre {
   margin-top: 10px;
 }
 
+.radar-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .legend-item {
   display: inline-flex;
   align-items: center;
@@ -347,6 +355,15 @@ pre {
   width: 12px;
   height: 12px;
   border-radius: 50%;
+}
+
+.legend-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #334155;
+  font-size: 0.84rem;
+  margin-top: 10px;
 }
 
 .timeline-row {

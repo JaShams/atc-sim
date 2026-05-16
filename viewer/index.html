@@ -47,7 +47,12 @@
           <canvas id="radar" width="900" height="560" aria-label="Radar replay canvas"></canvas>
           <div id="radarTooltip" class="radar-tooltip" hidden></div>
         </div>
-        <div id="radarLegend" class="radar-legend" aria-label="Radar legend"></div>
+        <div class="radar-meta">
+          <div id="radarLegend" class="radar-legend" aria-label="Radar legend"></div>
+          <label class="legend-toggle" title="Show 1-3 minute projected path for the selected aircraft.">
+            <input id="togglePrediction" type="checkbox" checked /> Show prediction overlay
+          </label>
+        </div>
         <div class="timeline-row" aria-label="Replay controls">
           <button id="stepBack" class="icon-button" type="button" disabled aria-label="Previous tick" title="Previous tick">&#9664;</button>
           <button id="playPause" type="button" disabled aria-label="Play replay" title="Play replay">Play</button>
