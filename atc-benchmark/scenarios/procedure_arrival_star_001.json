@@ -1,0 +1,28 @@
+{
+  "tick_sec": 5,
+  "airport": {
+    "runway_id": "27",
+    "active_runway": "27"
+  },
+  "aircraft": [
+    {
+      "callsign": "UAL202",
+      "role": "arrival",
+      "x_nm": 12.0,
+      "y_nm": 8.0,
+      "altitude_ft": 11000,
+      "speed_kt": 250,
+      "heading_deg": 240,
+      "status": "airborne",
+      "route_id": "STAR-TEST1",
+      "procedure_type": "STAR",
+      "waypoints": [
+        {"name": "STAR1", "x_nm": 8.0, "y_nm": 4.0, "max_altitude_ft": 9000, "speed_kt": 240},
+        {"name": "STAR2", "x_nm": 4.0, "y_nm": 2.0, "max_altitude_ft": 6000, "speed_kt": 210},
+        {"name": "FINAL", "x_nm": 1.0, "y_nm": 0.0, "max_altitude_ft": 3000, "speed_kt": 180}
+      ],
+      "current_leg_index": 0,
+      "current_leg_completed": false
+    }
+  ]
+}

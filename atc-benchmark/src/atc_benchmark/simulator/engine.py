@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import random
 from pathlib import Path
 
 from atc_benchmark.agents.base import extract_actions
@@ -26,6 +27,10 @@ from .validator import validate_actions
 
 TAKEOFF_RUNWAY_OCCUPANCY_SEC = 35
 LANDING_RUNWAY_OCCUPANCY_SEC = 50
+
+AIRBORNE_DELAYED_ACTION_TYPES = {"assign_heading", "assign_altitude", "assign_speed", "clear_to_land", "go_around"}
+# Exempt actions are executed immediately to preserve safety-critical runway occupancy state transitions.
+IMMEDIATE_ACTION_EXEMPT_TYPES = {"clear_for_takeoff", "hold_short", "hold_position", "no_op"}
 
 
 def _runway_heading_deg(runway_id: str) -> float:
@@ -154,6 +159,7 @@ def _named_fix_lookup(world: WorldState) -> dict[str, tuple[float, float]]:
 def advance(world: WorldState) -> None:
     dt_hr = world.tick_sec / 3600
     for ac in world.aircraft.values():
+        _update_managed_route(world, ac)
         if ac.status in {"airborne", "on_final", "go_around", "rolling", "airborne_departure", "holding"}:
             rad = math.radians(ac.heading_deg)
             wind_to_deg = (world.weather.wind_dir_deg + 180) % 360
@@ -213,6 +219,36 @@ def advance(world: WorldState) -> None:
             ac.status = "exited_airspace"
 
 
+def _update_managed_route(world: WorldState, ac: Aircraft) -> None:
+    if not ac.waypoints or not ac.managed_route_active:
+        return
+    if ac.manual_override_until_sec is not None and world.time_sec < ac.manual_override_until_sec:
+        return
+    ac.manual_override_until_sec = None
+    if ac.current_leg_index >= len(ac.waypoints):
+        ac.current_leg_completed = True
+        return
+    wp = ac.waypoints[ac.current_leg_index]
+    dx = wp["x_nm"] - ac.x_nm
+    dy = wp["y_nm"] - ac.y_nm
+    dist = math.hypot(dx, dy)
+    if dist <= 0.5:
+        ac.current_leg_completed = True
+        ac.current_leg_index += 1
+        return
+    ac.current_leg_completed = False
+    ac.heading_deg = (math.degrees(math.atan2(dx, dy)) + 360) % 360
+    min_alt = wp.get("min_altitude_ft")
+    max_alt = wp.get("max_altitude_ft")
+    if min_alt is not None and ac.altitude_ft < min_alt:
+        ac.target_altitude_ft = min_alt
+        ac.vertical_rate_fpm = 1000
+    elif max_alt is not None and ac.altitude_ft > max_alt:
+        ac.target_altitude_ft = max_alt
+        ac.vertical_rate_fpm = -1000
+    if wp.get("speed_kt") is not None:
+        ac.speed_kt = wp["speed_kt"]
+
 
 def _point_in_polygon(x_nm: float, y_nm: float, vertices: list[dict]) -> bool:
     inside = False
@@ -260,12 +296,18 @@ def apply_actions(world: WorldState, actions: list[dict]) -> dict:
         t = action["type"]
         if t == "assign_heading":
             ac.heading_deg = action["heading"]
+            ac.managed_route_active = False
+            ac.manual_override_until_sec = world.time_sec + 120
         elif t == "assign_altitude":
             target = action["altitude_ft"]
             ac.target_altitude_ft = target
             ac.vertical_rate_fpm = 0 if target == ac.altitude_ft else 1500 if target > ac.altitude_ft else -1500
+            ac.managed_route_active = False
+            ac.manual_override_until_sec = world.time_sec + 120
         elif t == "assign_speed":
             ac.speed_kt = action["speed_kt"]
+            ac.managed_route_active = False
+            ac.manual_override_until_sec = world.time_sec + 120
         elif t == "clear_to_land":
             ac.clearance = "cleared_to_land"
             ac.status = "on_final"
@@ -285,6 +327,8 @@ def apply_actions(world: WorldState, actions: list[dict]) -> dict:
             go_arounds += 1
         elif t in {"hold_short", "hold_position"}:
             ac.speed_kt = 0
+            ac.managed_route_active = False
+            ac.manual_override_until_sec = world.time_sec + 120
         elif t == "hold_at_waypoint":
             waypoint = action["waypoint"]
             fx, fy = fix_lookup[waypoint]
@@ -299,6 +343,8 @@ def apply_actions(world: WorldState, actions: list[dict]) -> dict:
             ac.hold_phase = "inbound"
             ac.hold_leg_progress_nm = 0.0
             ac.hold_turn_remaining_deg = 0.0
+            ac.managed_route_active = False
+            ac.manual_override_until_sec = None
             ac.status = "holding"
         elif t == "exit_hold":
             ac.hold_fix_id = None
@@ -312,11 +358,57 @@ def apply_actions(world: WorldState, actions: list[dict]) -> dict:
             ac.hold_turn_remaining_deg = 0.0
             if ac.status == "holding":
                 ac.status = "airborne"
+            ac.managed_route_active = False
+            ac.manual_override_until_sec = world.time_sec + 120
+        elif t == "resume_procedure":
+            ac.managed_route_active = True
+            ac.manual_override_until_sec = None
         elif t == "no_op":
             continue
     return {"go_around_count": go_arounds}
 
 
+
+
+def _sample_command_delay_sec(world: WorldState, rng: random.Random) -> int:
+    delay = world.rules.pilot_readback_delay_sec or {"min": 0, "max": 0}
+    min_delay = int(delay.get("min", 0))
+    max_delay = int(delay.get("max", min_delay))
+    if max_delay < min_delay:
+        min_delay, max_delay = max_delay, min_delay
+    return rng.randint(min_delay, max_delay)
+
+
+def _enqueue_actions(world: WorldState, pending_commands: list[dict], valid_actions: list[dict], rng: random.Random) -> None:
+    for action in valid_actions:
+        action_type = action["type"]
+        ac = world.aircraft[action["aircraft"]]
+        should_delay = action_type in AIRBORNE_DELAYED_ACTION_TYPES and ac.status in {"airborne", "on_final", "go_around", "airborne_departure"}
+        if should_delay and action_type not in IMMEDIATE_ACTION_EXEMPT_TYPES:
+            delay_sec = _sample_command_delay_sec(world, rng)
+            pending_commands.append({
+                "action": action,
+                "issued_at_sec": world.time_sec,
+                "scheduled_execution_time_sec": world.time_sec + delay_sec,
+            })
+        else:
+            pending_commands.append({
+                "action": action,
+                "issued_at_sec": world.time_sec,
+                "scheduled_execution_time_sec": world.time_sec,
+            })
+
+
+def _drain_due_actions(world: WorldState, pending_commands: list[dict]) -> list[dict]:
+    ready: list[dict] = []
+    future: list[dict] = []
+    for command in pending_commands:
+        if world.time_sec >= command["scheduled_execution_time_sec"]:
+            ready.append(command["action"])
+        else:
+            future.append(command)
+    pending_commands[:] = future
+    return ready
 def apply_events(world: WorldState) -> list[dict]:
     triggered: list[dict] = []
     for event in world.events:
@@ -558,6 +650,8 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
         ScoreComponentId.RESTRICTED_ZONE_VIOLATION: 0.0,
     }
     tick_records: list[dict] = []
+    pending_commands: list[dict] = []
+    rng = random.Random(world.rules.command_delay_seed)
 
     for tick_id in range(max_ticks):
         triggered_events = apply_events(world)
@@ -622,9 +716,13 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
             invalid = malformed + invalid
             malformed_agent_outputs_count += len(malformed)
             invalid_count += len(invalid)
-            effects = apply_actions(world, valid)
+            _enqueue_actions(world, pending_commands, valid, rng)
+
+        due_actions = _drain_due_actions(world, pending_commands)
+        if due_actions:
+            effects = apply_actions(world, due_actions)
             if latest_wind_change_sec is not None and not _runway_is_wind_compliant(world):
-                unsafe_clearances_after_wind_change += sum(1 for a in valid if a["type"] in {"clear_to_land", "clear_for_takeoff"})
+                unsafe_clearances_after_wind_change += sum(1 for a in due_actions if a["type"] in {"clear_to_land", "clear_for_takeoff"})
             go_around_count += effects["go_around_count"]
             after_predictions = predict_conflicts(world)
             lifecycle.update(after_predictions, is_action_phase=True)

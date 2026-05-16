@@ -14,6 +14,7 @@ ALLOWED_ACTION_TYPES = {
     "hold_position",
     "hold_at_waypoint",
     "exit_hold",
+    "resume_procedure",
     "no_op",
 }
 
@@ -40,6 +41,13 @@ class Aircraft:
     landing_time_sec: int | None = None
     ideal_takeoff_time_sec: int | None = None
     ideal_landing_time_sec: int | None = None
+    route_id: str | None = None
+    procedure_type: str | None = None
+    waypoints: list[dict[str, Any]] = field(default_factory=list)
+    current_leg_index: int = 0
+    current_leg_completed: bool = False
+    managed_route_active: bool = True
+    manual_override_until_sec: int | None = None
     hold_fix_id: str | None = None
     hold_fix_x_nm: float | None = None
     hold_fix_y_nm: float | None = None
@@ -84,6 +92,8 @@ class RulesConfig:
     outcome_normalization_floor: float = 1.0
     debug_require_trigger_provenance: bool = False
     restricted_zones: list[dict[str, Any]] = field(default_factory=list)
+    pilot_readback_delay_sec: dict[str, int] = field(default_factory=lambda: {"min": 0, "max": 0})
+    command_delay_seed: int | None = None
 
 
 @dataclass

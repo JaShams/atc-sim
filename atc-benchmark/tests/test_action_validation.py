@@ -95,6 +95,7 @@ def test_every_allowed_action_is_applied_or_explicitly_rejected():
             "hold_altitude_ft": 4000,
         },
         "exit_hold": {"aircraft": "ARR1", "type": "exit_hold"},
+        "resume_procedure": {"aircraft": "ARR1", "type": "resume_procedure"},
         "no_op": {"aircraft": "ARR1", "type": "no_op"},
     }
     engine_applied_types = {
@@ -108,6 +109,7 @@ def test_every_allowed_action_is_applied_or_explicitly_rejected():
         "hold_position",
         "hold_at_waypoint",
         "exit_hold",
+        "resume_procedure",
         "no_op",
     }
 
