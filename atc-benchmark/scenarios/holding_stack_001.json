@@ -1,0 +1,33 @@
+{
+  "tick_sec": 5,
+  "airport": {
+    "runway_id": "27",
+    "active_runway": "27",
+    "layout": {
+      "fixes": [
+        {"id": "HOLD1", "x_nm": -10.0, "y_nm": 8.0}
+      ]
+    }
+  },
+  "waypoints": [
+    {"id": "HOLD2", "x_nm": -12.0, "y_nm": 9.0}
+  ],
+  "aircraft": [
+    {"callsign": "ARR1", "role": "arrival", "x_nm": -8.0, "y_nm": 8.0, "altitude_ft": 6500, "speed_kt": 200, "heading_deg": 270, "status": "airborne"},
+    {"callsign": "ARR2", "role": "arrival", "x_nm": -8.5, "y_nm": 8.5, "altitude_ft": 7500, "speed_kt": 200, "heading_deg": 270, "status": "airborne"},
+    {"callsign": "ARR3", "role": "arrival", "x_nm": -9.0, "y_nm": 9.0, "altitude_ft": 8500, "speed_kt": 200, "heading_deg": 270, "status": "airborne"}
+  ],
+  "scenario_metadata": {
+    "tags": ["efficiency"],
+    "difficulty_tier": "intermediate",
+    "intended_stressors": [
+      "holding stack sequencing",
+      "altitude deconfliction"
+    ],
+    "expected_baseline_ranges": {
+      "score": [0, 120],
+      "active_conflicts_count_total": [0, 60],
+      "invalid_commands": [0, 20]
+    }
+  }
+}

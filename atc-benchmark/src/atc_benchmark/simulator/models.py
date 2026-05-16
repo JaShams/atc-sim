@@ -12,6 +12,9 @@ ALLOWED_ACTION_TYPES = {
     "go_around",
     "hold_short",
     "hold_position",
+    "hold_at_waypoint",
+    "exit_hold",
+    "resume_procedure",
     "no_op",
 }
 
@@ -48,6 +51,22 @@ class Aircraft:
     max_speed_kt: float | None = None
     min_speed_kt: float | None = None
     max_turn_rate_deg_per_sec: float | None = None
+    route_id: str | None = None
+    procedure_type: str | None = None
+    waypoints: list[dict[str, Any]] = field(default_factory=list)
+    current_leg_index: int = 0
+    current_leg_completed: bool = False
+    managed_route_active: bool = True
+    manual_override_until_sec: int | None = None
+    hold_fix_id: str | None = None
+    hold_fix_x_nm: float | None = None
+    hold_fix_y_nm: float | None = None
+    hold_leg_length_nm: float | None = None
+    hold_turn_direction: str | None = None
+    hold_altitude_ft: float | None = None
+    hold_phase: str | None = None
+    hold_leg_progress_nm: float = 0.0
+    hold_turn_remaining_deg: float = 0.0
 
 
 @dataclass
@@ -83,6 +102,8 @@ class RulesConfig:
     outcome_normalization_floor: float = 1.0
     debug_require_trigger_provenance: bool = False
     restricted_zones: list[dict[str, Any]] = field(default_factory=list)
+    pilot_readback_delay_sec: dict[str, int] = field(default_factory=lambda: {"min": 0, "max": 0})
+    command_delay_seed: int | None = None
 
 
 @dataclass
