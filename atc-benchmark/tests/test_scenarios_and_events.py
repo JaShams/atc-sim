@@ -84,6 +84,23 @@ def test_emergency_and_conflict_simultaneous_decision_points():
     assert any(dp["type"] in {"predicted_conflict", "active_conflict"} for dp in dps)
 
 
+def test_low_fuel_emergency_deadline_causes_terminal_failure():
+    world = load_world(resolve_scenario_path("scenarios/low_fuel_mixed_traffic_priority_001.json"))
+    run(world, NoOpAgent(), max_ticks=40, trace_path=Path("/tmp/low_fuel_trace.jsonl"))
+    assert world.aircraft["ARR_LOW"].status == "terminal_failure"
+
+
+def test_engine_failure_event_applies_constraints():
+    world = load_world(resolve_scenario_path("scenarios/engine_failure_return_priority_001.json"))
+    world.time_sec = 0
+    events = apply_events(world)
+    ac = world.aircraft["ARR_ENG"]
+    assert events and events[0]["type"] == "engine_failure"
+    assert ac.emergency_subtype == "engine_failure"
+    assert ac.max_climb_fpm == 400
+    assert ac.max_speed_kt == 200
+
+
 def test_airport_layout_survives_load_snapshot_and_trace(tmp_path):
     source = json.loads(resolve_scenario_path("scenarios/crossing_conflict_001.json").read_text())
     layout = {

@@ -220,13 +220,32 @@ def apply_actions(world: WorldState, actions: list[dict]) -> dict:
         ac = world.aircraft[action["aircraft"]]
         t = action["type"]
         if t == "assign_heading":
-            ac.heading_deg = action["heading"]
+            desired_heading = action["heading"]
+            if ac.max_turn_rate_deg_per_sec is not None:
+                max_delta = ac.max_turn_rate_deg_per_sec * world.tick_sec
+                delta = ((desired_heading - ac.heading_deg + 180) % 360) - 180
+                if abs(delta) > max_delta:
+                    delta = math.copysign(max_delta, delta)
+                ac.heading_deg = (ac.heading_deg + delta) % 360
+            else:
+                ac.heading_deg = desired_heading
         elif t == "assign_altitude":
             target = action["altitude_ft"]
             ac.target_altitude_ft = target
-            ac.vertical_rate_fpm = 0 if target == ac.altitude_ft else 1500 if target > ac.altitude_ft else -1500
+            if target == ac.altitude_ft:
+                ac.vertical_rate_fpm = 0
+            elif target > ac.altitude_ft:
+                ac.vertical_rate_fpm = ac.max_climb_fpm if ac.max_climb_fpm is not None else 1500
+            else:
+                descent_limit = ac.max_descent_fpm if ac.max_descent_fpm is not None else 1500
+                ac.vertical_rate_fpm = -descent_limit
         elif t == "assign_speed":
-            ac.speed_kt = action["speed_kt"]
+            speed = action["speed_kt"]
+            if ac.max_speed_kt is not None:
+                speed = min(speed, ac.max_speed_kt)
+            if ac.min_speed_kt is not None:
+                speed = max(speed, ac.min_speed_kt)
+            ac.speed_kt = speed
         elif t == "clear_to_land":
             ac.clearance = "cleared_to_land"
             ac.status = "on_final"
@@ -267,8 +286,41 @@ def apply_events(world: WorldState) -> list[dict]:
                 world.airport.active_runway = event["active_runway"]
         elif etype == "emergency_declare":
             world.aircraft[event["aircraft"]].emergency = True
+        elif etype == "low_fuel_emergency":
+            ac = world.aircraft[event["aircraft"]]
+            ac.emergency = True
+            ac.emergency_subtype = "low_fuel"
+            ac.emergency_deadline_sec = event.get("deadline_sec")
+            ac.emergency_remaining_endurance_sec = event.get("remaining_endurance_sec")
+            ac.emergency_require_return_to_land = True
+        elif etype == "engine_failure":
+            ac = world.aircraft[event["aircraft"]]
+            ac.emergency = True
+            ac.emergency_subtype = "engine_failure"
+            ac.emergency_require_return_to_land = event.get("require_return_to_land", True)
+            ac.max_climb_fpm = event.get("max_climb_fpm", 500)
+            ac.max_descent_fpm = event.get("max_descent_fpm", 1200)
+            ac.max_speed_kt = event.get("max_speed_kt", 210)
+            ac.min_speed_kt = event.get("min_speed_kt", 130)
+            ac.max_turn_rate_deg_per_sec = event.get("max_turn_rate_deg_per_sec", 2.0)
         triggered.append({k: v for k, v in event.items() if k != "applied"})
     return triggered
+
+
+def _update_emergency_state(world: WorldState) -> int:
+    terminal_failures = 0
+    for ac in world.aircraft.values():
+        if ac.emergency_subtype == "low_fuel" and ac.status not in {"landed", "exited_airspace"}:
+            if ac.emergency_remaining_endurance_sec is not None:
+                ac.emergency_remaining_endurance_sec = max(0, ac.emergency_remaining_endurance_sec - world.tick_sec)
+                if ac.emergency_remaining_endurance_sec == 0:
+                    ac.emergency_terminal_failure = True
+            if ac.emergency_deadline_sec is not None and world.time_sec >= ac.emergency_deadline_sec:
+                ac.emergency_terminal_failure = True
+        if ac.emergency_terminal_failure and ac.status not in {"terminal_failure", "landed"}:
+            ac.status = "terminal_failure"
+            terminal_failures += 1
+    return terminal_failures
 
 
 def _build_score_result(
@@ -291,6 +343,8 @@ def _build_score_result(
     predicted_conflicts_count_total: int,
     manifest: dict | None,
     restricted_zone_violation_count: int,
+    emergency_handled_by_type: dict[str, int] | None = None,
+    emergency_unhandled_by_type: dict[str, int] | None = None,
 ) -> dict:
     conflict_introduced_count = lifecycle.transition_counts["introduced"]
     conflict_resolved_count = lifecycle.transition_counts["resolved"]
@@ -364,6 +418,8 @@ def _build_score_result(
             "predicted_conflicts_count_total": predicted_conflicts_count_total,
             "throughput_ops_per_hour": throughput_ops_per_hour,
             "restricted_zone_violation_count": restricted_zone_violation_count,
+            "emergency_handled_by_type": emergency_handled_by_type or {},
+            "emergency_unhandled_by_type": emergency_unhandled_by_type or {},
         },
     }
     if manifest is not None:
@@ -469,6 +525,8 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
     unsafe_clearances_after_wind_change = 0
     emergency_priority_compliant_count = 0
     emergency_priority_violation_count = 0
+    emergency_handled_by_type = {"low_fuel": 0, "engine_failure": 0, "generic": 0}
+    emergency_unhandled_by_type = {"low_fuel": 0, "engine_failure": 0, "generic": 0}
     active_conflicts_count_total = 0
     predicted_conflicts_count_total = 0
     restricted_zone_violation_count = 0
@@ -605,6 +663,16 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
             world.airport.runway_occupied_by = None
             world.airport.runway_phase = None
             world.airport.runway_occupied_until_sec = None
+        _update_emergency_state(world)
+
+    for ac in world.aircraft.values():
+        if not ac.emergency:
+            continue
+        key = ac.emergency_subtype or "generic"
+        if ac.status == "landed":
+            emergency_handled_by_type[key] = emergency_handled_by_type.get(key, 0) + 1
+        else:
+            emergency_unhandled_by_type[key] = emergency_unhandled_by_type.get(key, 0) + 1
 
     _finalize_tick_outcomes(world, tick_records)
     with trace_path.open("w", encoding="utf-8") as f:
@@ -632,6 +700,8 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
         predicted_conflicts_count_total=predicted_conflicts_count_total,
         manifest=manifest,
         restricted_zone_violation_count=restricted_zone_violation_count,
+        emergency_handled_by_type=emergency_handled_by_type,
+        emergency_unhandled_by_type=emergency_unhandled_by_type,
     )
 
 

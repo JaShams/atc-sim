@@ -16,6 +16,15 @@ def test_valid_scenario_document_passes():
     validate_scenario_document(_valid_payload())
 
 
+def test_valid_new_emergency_events_pass():
+    payload = _valid_payload()
+    payload["events"] = [
+        {"time_sec": 5, "type": "low_fuel_emergency", "aircraft": payload["aircraft"][0]["callsign"], "remaining_endurance_sec": 120},
+        {"time_sec": 10, "type": "engine_failure", "aircraft": payload["aircraft"][1]["callsign"], "max_climb_fpm": 400},
+    ]
+    validate_scenario_document(payload)
+
+
 def test_valid_restricted_zones_pass():
     payload = _valid_payload()
     payload["rules"] = {

@@ -15,8 +15,9 @@ ALLOWED_AIRCRAFT_STATUSES = {
     "rolling",
     "airborne_departure",
     "exited_airspace",
+    "terminal_failure",
 }
-ALLOWED_EVENT_TYPES = {"wind_change", "emergency_declare"}
+ALLOWED_EVENT_TYPES = {"wind_change", "emergency_declare", "low_fuel_emergency", "engine_failure"}
 REQUIRED_TOP_LEVEL = {"airport", "aircraft"}
 REQUIRED_AIRCRAFT = {"callsign", "role", "x_nm", "y_nm", "altitude_ft", "speed_kt", "heading_deg", "status"}
 REQUIRED_AIRPORT = {"runway_id", "active_runway"}
@@ -341,3 +342,21 @@ def _validate_events(events: Any, callsigns: set[str], errors: list[str]) -> Non
                 errors.append(f"{label}.active_runway must be a runway number string from '01' to '36'")
         if etype == "emergency_declare" and event.get("aircraft") not in callsigns:
             errors.append(f"{label}.aircraft must reference a known callsign")
+        if etype == "low_fuel_emergency":
+            if event.get("aircraft") not in callsigns:
+                errors.append(f"{label}.aircraft must reference a known callsign")
+            if "deadline_sec" in event and (not isinstance(event.get("deadline_sec"), int) or event.get("deadline_sec") < 0):
+                errors.append(f"{label}.deadline_sec must be a non-negative integer when present")
+            if "remaining_endurance_sec" in event and (
+                not isinstance(event.get("remaining_endurance_sec"), int) or event.get("remaining_endurance_sec") < 0
+            ):
+                errors.append(f"{label}.remaining_endurance_sec must be a non-negative integer when present")
+            if "deadline_sec" not in event and "remaining_endurance_sec" not in event:
+                errors.append(f"{label} must include deadline_sec or remaining_endurance_sec")
+        if etype == "engine_failure":
+            if event.get("aircraft") not in callsigns:
+                errors.append(f"{label}.aircraft must reference a known callsign")
+            numeric_fields = ("max_climb_fpm", "max_descent_fpm", "max_speed_kt", "min_speed_kt", "max_turn_rate_deg_per_sec")
+            for field in numeric_fields:
+                if field in event and not _is_non_negative_number(event[field]):
+                    errors.append(f"{label}.{field} must be non-negative when present")
