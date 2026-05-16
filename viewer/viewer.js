@@ -15,6 +15,7 @@ const canvas = document.getElementById('radar');
 const ctx = canvas.getContext('2d');
 const radarTooltip = document.getElementById('radarTooltip');
 const radarLegend = document.getElementById('radarLegend');
+const togglePrediction = document.getElementById('togglePrediction');
 const playPause = document.getElementById('playPause');
 const stepBack = document.getElementById('stepBack');
 const stepForward = document.getElementById('stepForward');
@@ -31,6 +32,7 @@ let playTimer = null;
 let radarTargets = [];
 let hoveredCallsign = null;
 let selectedCallsign = null;
+let showPredictionOverlay = true;
 let currentTickIndex = 0;
 let isPanning = false;
 let lastPanPoint = null;
@@ -113,6 +115,10 @@ canvas.addEventListener('wheel', handleRadarWheel, { passive: false });
 canvas.addEventListener('mousedown', startRadarPan);
 window.addEventListener('mousemove', panRadar);
 window.addEventListener('mouseup', stopRadarPan);
+togglePrediction.addEventListener('change', () => {
+  showPredictionOverlay = togglePrediction.checked;
+  drawCurrentRadar();
+});
 
 renderRadarLegend();
 
@@ -372,6 +378,75 @@ function drawRadar(state, aircraft, conflictSet, predictedSet, conflicts, predic
 
     radarTargets.push({ ac, x, y, conflict: conflictSet.has(ac.callsign), predicted: predictedSet.has(ac.callsign) });
   }
+
+  if (showPredictionOverlay && selectedCallsign) {
+    const selectedAircraft = byCallsign[selectedCallsign];
+    if (selectedAircraft) drawPredictionOverlay(state, selectedAircraft);
+  }
+}
+
+function drawPredictionOverlay(state, aircraft) {
+  if (!Number.isFinite(Number(aircraft.x_nm)) || !Number.isFinite(Number(aircraft.y_nm))) return;
+  const headingDeg = Number(aircraft.heading_deg);
+  const speedKt = Number(aircraft.speed_kt);
+  if (!Number.isFinite(headingDeg) || !Number.isFinite(speedKt)) return;
+  const view = getViewBounds();
+  const intervalsSec = [60, 120, 180];
+  const wind = resolveWindVector(state);
+  const points = intervalsSec.map((seconds) => projectAircraftPosition(aircraft, seconds, wind));
+  const all = [{ x_nm: Number(aircraft.x_nm), y_nm: Number(aircraft.y_nm) }, ...points];
+
+  ctx.save();
+  ctx.setLineDash([4, 5]);
+  ctx.strokeStyle = 'rgba(248, 250, 252, 0.8)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  all.forEach((point, idx) => {
+    const x = project(point.x_nm, view.minX, view.maxX, 44, canvas.width - 44);
+    const y = project(point.y_nm, view.minY, view.maxY, canvas.height - 44, 44);
+    if (idx === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  points.forEach((point, idx) => {
+    const x = project(point.x_nm, view.minX, view.maxX, 44, canvas.width - 44);
+    const y = project(point.y_nm, view.minY, view.maxY, canvas.height - 44, 44);
+    ctx.fillStyle = 'rgba(248, 250, 252, 0.95)';
+    ctx.beginPath();
+    ctx.arc(x, y, 2.8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(248, 250, 252, 0.95)';
+    ctx.font = '11px Arial';
+    ctx.fillText(`+${idx + 1}m`, x + 6, y - 6);
+  });
+  ctx.restore();
+}
+
+function projectAircraftPosition(aircraft, secondsAhead, windVector) {
+  const headingRad = ((Number(aircraft.heading_deg) - 90) * Math.PI) / 180;
+  const distanceNm = (Number(aircraft.speed_kt) * secondsAhead) / 3600;
+  let dx = Math.cos(headingRad) * distanceNm;
+  let dy = Math.sin(headingRad) * distanceNm;
+  if (windVector) {
+    const windDistanceNm = (windVector.speedKt * secondsAhead) / 3600;
+    dx += Math.cos(windVector.headingRad) * windDistanceNm;
+    dy += Math.sin(windVector.headingRad) * windDistanceNm;
+  }
+  return {
+    x_nm: Number(aircraft.x_nm) + dx,
+    y_nm: Number(aircraft.y_nm) + dy
+  };
+}
+
+function resolveWindVector(state) {
+  const weather = state?.weather || {};
+  const speedKt = Number(weather.wind_speed_kt ?? weather.wind_speed_kts ?? weather.wind_kt ?? weather.speed_kt);
+  const fromDeg = Number(weather.wind_dir_deg ?? weather.wind_direction_deg ?? weather.wind_from_deg ?? weather.direction_deg);
+  if (!Number.isFinite(speedKt) || speedKt <= 0 || !Number.isFinite(fromDeg)) return null;
+  const toHeadingDeg = (fromDeg + 180) % 360;
+  return { speedKt, headingRad: ((toHeadingDeg - 90) * Math.PI) / 180 };
 }
 
 function drawRadarGrid() {
