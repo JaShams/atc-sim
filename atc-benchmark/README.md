@@ -75,3 +75,53 @@ Exact transition semantics (per `conflict_pair_id`):
 - `resolved` occurs whenever an active pair is absent in a later prediction snapshot.
 - `reintroduced` occurs when a previously resolved pair appears again later.
 - Secondary conflict penalty is intentionally tied only to `reintroduced` transitions. Newly `introduced` conflicts are tracked as lifecycle metrics but are not penalized as secondary creations.
+
+## Live backend transport (`ws://.../live`)
+
+`atc_benchmark.server.live_transport` provides a lightweight ASGI websocket endpoint at `/live` for streaming per-tick simulator snapshots to the viewer.
+
+### Connection lifecycle
+
+1. Client opens a websocket connection to `ws://<host>/live` (or `wss://.../live`).
+2. Server accepts the socket.
+3. Client sends:
+
+```json
+{"type": "subscribe_tick_stream"}
+```
+
+4. Server registers the connection as a tick-stream subscriber.
+5. On each simulation tick, backend publishes a tick envelope to all subscribers.
+6. On disconnect, server removes the subscriber queue.
+
+### Message schema
+
+The viewer (`viewer/viewer.js` `handleLiveEnvelope`) accepts either:
+
+- an envelope with `tick.state`, or
+- a raw tick object with `state`.
+
+This transport emits envelopes with the shape:
+
+```json
+{
+  "type": "tick",
+  "tick": {
+    "tick_id": 12,
+    "time": 60,
+    "state": {
+      "time_sec": 60,
+      "airport": {},
+      "weather": {},
+      "aircraft": {}
+    }
+  }
+}
+```
+
+Required fields for viewer compatibility:
+
+- top-level `type` = `"tick"`
+- `tick.state` object present for every published simulation tick
+
+Optional tick metadata may be included alongside `tick_id`, `time`, and `state`.
