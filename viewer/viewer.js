@@ -23,6 +23,16 @@ const playSpeed = document.getElementById('playSpeed');
 const zoomIn = document.getElementById('zoomIn');
 const zoomOut = document.getElementById('zoomOut');
 const resetView = document.getElementById('resetView');
+const modeSelect = document.getElementById('modeSelect');
+const modeStatus = document.getElementById('modeStatus');
+const livePanel = document.getElementById('livePanel');
+const liveEndpointInput = document.getElementById('liveEndpoint');
+const liveConnect = document.getElementById('liveConnect');
+const liveDisconnect = document.getElementById('liveDisconnect');
+const commandAircraft = document.getElementById('commandAircraft');
+const commandType = document.getElementById('commandType');
+const commandValue = document.getElementById('commandValue');
+const sendCommand = document.getElementById('sendCommand');
 
 let traceEvents = [];
 let score = null;
@@ -36,6 +46,10 @@ let showPredictionOverlay = true;
 let currentTickIndex = 0;
 let isPanning = false;
 let lastPanPoint = null;
+let currentMode = 'replay';
+let liveSocket = null;
+let livePollTimer = null;
+let liveSessionId = null;
 
 const palette = {
   normal: '#2563eb',
@@ -119,8 +133,13 @@ togglePrediction.addEventListener('change', () => {
   showPredictionOverlay = togglePrediction.checked;
   drawCurrentRadar();
 });
+modeSelect.addEventListener('change', handleModeChange);
+liveConnect.addEventListener('click', connectLiveTransport);
+liveDisconnect.addEventListener('click', disconnectLiveTransport);
+sendCommand.addEventListener('click', sendLiveCommand);
 
 renderRadarLegend();
+handleModeChange();
 
 async function loadFiles() {
   if (!traceFileInput.files[0]) return;
@@ -152,6 +171,134 @@ async function loadFiles() {
     renderTimeline();
   } catch (err) {
     loadStatus.textContent = `Failed to parse files: ${err.message}`;
+  }
+}
+
+function handleModeChange() {
+  currentMode = modeSelect.value;
+  const isLive = currentMode === 'live';
+  livePanel.hidden = !isLive;
+  traceFileInput.closest('section').hidden = isLive;
+  modeStatus.textContent = isLive
+    ? 'Live mode connects to a backend adapter and streams tick snapshots.'
+    : 'Replay mode loads files from disk.';
+  if (!isLive) disconnectLiveTransport();
+}
+
+function connectLiveTransport() {
+  const endpoint = (liveEndpointInput.value || '').trim();
+  if (!endpoint) return;
+  disconnectLiveTransport();
+  if (endpoint.startsWith('ws://') || endpoint.startsWith('wss://')) {
+    liveSocket = new WebSocket(endpoint);
+    liveSocket.onopen = () => {
+      setLiveConnectionState(true);
+      loadStatus.textContent = `Live connected: ${endpoint}`;
+      liveSocket.send(JSON.stringify({ type: 'subscribe_tick_stream' }));
+    };
+    liveSocket.onmessage = (event) => handleLiveEnvelope(safeParseJson(event.data));
+    liveSocket.onerror = () => {
+      loadStatus.textContent = 'Live transport error.';
+    };
+    liveSocket.onclose = () => setLiveConnectionState(false);
+    return;
+  }
+  setLiveConnectionState(true);
+  livePollTimer = setInterval(async () => {
+    const state = await fetch(`${endpoint.replace(/\/$/, '')}/state`).then((res) => res.json()).catch(() => null);
+    if (state) handleLiveEnvelope(state);
+  }, 1000);
+}
+
+function disconnectLiveTransport() {
+  if (liveSocket) liveSocket.close();
+  liveSocket = null;
+  if (livePollTimer) clearInterval(livePollTimer);
+  livePollTimer = null;
+  setLiveConnectionState(false);
+}
+
+function setLiveConnectionState(connected) {
+  liveConnect.disabled = connected;
+  liveDisconnect.disabled = !connected;
+  sendCommand.disabled = !connected;
+}
+
+function handleLiveEnvelope(payload) {
+  if (!payload) return;
+  if (payload.type === 'level_complete') {
+    persistLiveRun(payload);
+    return;
+  }
+  const event = payload.tick || payload;
+  if (!event?.state) return;
+  traceEvents.push(event);
+  slider.disabled = false;
+  playPause.disabled = false;
+  stepBack.disabled = false;
+  stepForward.disabled = false;
+  zoomIn.disabled = false;
+  zoomOut.disabled = false;
+  resetView.disabled = false;
+  radarBounds = calculateBounds(traceEvents);
+  if (!radarView) resetRadarView(false);
+  slider.max = Math.max(0, traceEvents.length - 1);
+  renderAtTick(traceEvents.length - 1);
+  renderTimeline();
+  populateAircraftSelector(event);
+}
+
+function populateAircraftSelector(event) {
+  const options = Object.keys(event?.state?.aircraft || {});
+  const previous = commandAircraft.value;
+  clearNode(commandAircraft);
+  options.forEach((callsign) => {
+    const node = document.createElement('option');
+    node.value = callsign;
+    node.textContent = callsign;
+    commandAircraft.appendChild(node);
+  });
+  if (options.includes(previous)) commandAircraft.value = previous;
+}
+
+function sendLiveCommand() {
+  const aircraft = commandAircraft.value;
+  const type = commandType.value;
+  const numericValue = Number(commandValue.value);
+  const command = { type, aircraft };
+  if (type === 'assign_heading') command.heading = numericValue;
+  if (type === 'assign_altitude') command.altitude_ft = numericValue;
+  if (type === 'assign_speed') command.speed_kt = numericValue;
+  const envelope = { type: 'command', session_id: liveSessionId, command };
+  if (liveSocket && liveSocket.readyState === WebSocket.OPEN) {
+    liveSocket.send(JSON.stringify(envelope));
+    return;
+  }
+  const endpoint = (liveEndpointInput.value || '').trim().replace(/\/$/, '');
+  fetch(`${endpoint}/command`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(envelope) });
+}
+
+function persistLiveRun(payload) {
+  const finalScore = payload.score || null;
+  const traceJsonl = traceEvents.map((event) => JSON.stringify(event)).join('\n');
+  const scoreJson = JSON.stringify(finalScore || {}, null, 2);
+  localStorage.setItem('atc_last_trace_jsonl', traceJsonl);
+  localStorage.setItem('atc_last_score_json', scoreJson);
+  score = finalScore;
+  modeSelect.value = 'replay';
+  handleModeChange();
+  loadStatus.textContent = 'Level complete. Saved run locally and switched to replay mode.';
+  renderScenarioSummary();
+  renderScore();
+  renderAtTick(0);
+  renderTimeline();
+}
+
+function safeParseJson(value) {
+  try {
+    return typeof value === 'string' ? JSON.parse(value) : value;
+  } catch {
+    return null;
   }
 }
 
