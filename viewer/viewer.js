@@ -33,6 +33,8 @@ const commandAircraft = document.getElementById('commandAircraft');
 const commandType = document.getElementById('commandType');
 const commandValue = document.getElementById('commandValue');
 const sendCommand = document.getElementById('sendCommand');
+const commandHint = document.getElementById('commandHint');
+const commandFeedback = document.getElementById('commandFeedback');
 
 let traceEvents = [];
 let score = null;
@@ -137,9 +139,40 @@ modeSelect.addEventListener('change', handleModeChange);
 liveConnect.addEventListener('click', connectLiveTransport);
 liveDisconnect.addEventListener('click', disconnectLiveTransport);
 sendCommand.addEventListener('click', sendLiveCommand);
+commandType.addEventListener('change', syncCommandFormForType);
+commandValue.addEventListener('input', () => setCommandFeedback(null, ''));
+
+const COMMAND_SCHEMA = {
+  no_op: { label: 'No action', unitHint: null },
+  assign_heading: { label: 'Assign heading', field: 'heading', min: 0, max: 359, step: 1, unitHint: 'degrees (0-359)' },
+  assign_altitude: { label: 'Assign altitude', field: 'altitude_ft', min: 1000, max: 45000, step: 100, unitHint: 'ft (>= 1000)' },
+  assign_speed: { label: 'Assign speed', field: 'speed_kt', min: 120, max: 280, step: 1, unitHint: 'kt (120-280)' },
+  clear_to_land: { label: 'Clear to land', unitHint: null },
+  clear_for_takeoff: { label: 'Clear for takeoff', unitHint: null },
+  go_around: { label: 'Go around', unitHint: null },
+  hold_short: { label: 'Hold short', unitHint: null },
+  hold_position: { label: 'Hold position', unitHint: null }
+};
+
+const VALIDATOR_REASON_MESSAGES = {
+  unknown_aircraft: 'Unknown callsign.',
+  invalid_action_type: 'Unsupported command type.',
+  contradictory_commands: 'Conflicting command for the same aircraft this tick.',
+  invalid_heading: 'Heading must be between 0 and 359 degrees.',
+  invalid_altitude: 'Altitude is below minimum allowed.',
+  invalid_speed: 'Speed is outside allowed range.',
+  runway_occupied: 'Runway is currently occupied.',
+  not_arrival: 'Only arrivals can receive landing clearance.',
+  not_on_final_or_arrival: 'Aircraft is not in a landing-eligible state.',
+  not_aligned_with_active_runway: 'Aircraft is not aligned with the active runway.',
+  not_in_departure_queue: 'Aircraft is not in the departure queue.',
+  arrival_too_close: 'Inbound arrival is too close for safe departure.',
+  not_on_approach: 'Aircraft is not on approach for go-around.'
+};
 
 renderRadarLegend();
 handleModeChange();
+syncCommandFormForType();
 
 async function loadFiles() {
   if (!traceFileInput.files[0]) return;
@@ -262,20 +295,85 @@ function populateAircraftSelector(event) {
 }
 
 function sendLiveCommand() {
-  const aircraft = commandAircraft.value;
-  const type = commandType.value;
-  const numericValue = Number(commandValue.value);
-  const command = { type, aircraft };
-  if (type === 'assign_heading') command.heading = numericValue;
-  if (type === 'assign_altitude') command.altitude_ft = numericValue;
-  if (type === 'assign_speed') command.speed_kt = numericValue;
-  const envelope = { type: 'command', session_id: liveSessionId, command };
+  const envelopeResult = buildLiveCommandEnvelope();
+  if (!envelopeResult.ok) {
+    setCommandFeedback('rejected', `Rejected: ${envelopeResult.reason}`);
+    return;
+  }
+  const { envelope } = envelopeResult;
+  setCommandFeedback(null, 'Sending command…');
   if (liveSocket && liveSocket.readyState === WebSocket.OPEN) {
     liveSocket.send(JSON.stringify(envelope));
+    setCommandFeedback('accepted', 'Accepted: command dispatched over WebSocket.');
     return;
   }
   const endpoint = (liveEndpointInput.value || '').trim().replace(/\/$/, '');
-  fetch(`${endpoint}/command`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(envelope) });
+  fetch(`${endpoint}/command`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(envelope) })
+    .then(async (res) => {
+      const payload = await res.json().catch(() => ({}));
+      const responseReason = extractCommandRejectionReason(payload);
+      if (!res.ok || responseReason) {
+        const reason = responseReason || payload?.error || `HTTP ${res.status}`;
+        setCommandFeedback('rejected', `Rejected: ${reason}`);
+        return;
+      }
+      setCommandFeedback('accepted', 'Accepted: command delivered to backend.');
+    })
+    .catch((err) => {
+      setCommandFeedback('rejected', `Rejected: transport error (${err.message}).`);
+    });
+}
+
+function buildLiveCommandEnvelope() {
+  const callsign = (commandAircraft.value || '').trim();
+  const actionType = commandType.value;
+  const schema = COMMAND_SCHEMA[actionType];
+  if (!callsign) return { ok: false, reason: 'Select a callsign.' };
+  if (!schema) return { ok: false, reason: 'Select a valid action type.' };
+  const command = { aircraft: callsign, type: actionType };
+  if (schema.field) {
+    const raw = commandValue.value;
+    const numericValue = Number(raw);
+    if (!raw || Number.isNaN(numericValue)) return { ok: false, reason: `Provide ${schema.unitHint}.` };
+    if (numericValue < schema.min || numericValue > schema.max) {
+      return { ok: false, reason: `${schema.label} must be ${schema.unitHint}.` };
+    }
+    command[schema.field] = numericValue;
+  }
+  return { ok: true, envelope: { type: 'command', session_id: liveSessionId, command } };
+}
+
+function syncCommandFormForType() {
+  const schema = COMMAND_SCHEMA[commandType.value] || { unitHint: null };
+  const needsNumeric = Boolean(schema.field);
+  commandValue.disabled = !needsNumeric;
+  commandValue.required = needsNumeric;
+  commandValue.placeholder = schema.unitHint ? `Enter ${schema.unitHint}` : '';
+  if (needsNumeric) {
+    commandValue.min = String(schema.min);
+    commandValue.max = String(schema.max);
+    commandValue.step = String(schema.step || 1);
+  } else {
+    commandValue.value = '';
+    commandValue.removeAttribute('min');
+    commandValue.removeAttribute('max');
+  }
+  commandHint.textContent = schema.unitHint
+    ? `Value required: ${schema.unitHint}.`
+    : 'No extra value required for this command.';
+}
+
+function extractCommandRejectionReason(payload) {
+  const reasonCode = payload?.reason || payload?.error_code || payload?.invalid?.[0]?.reason;
+  if (reasonCode && VALIDATOR_REASON_MESSAGES[reasonCode]) return VALIDATOR_REASON_MESSAGES[reasonCode];
+  if (typeof payload?.message === 'string' && payload.message) return payload.message;
+  return reasonCode || null;
+}
+
+function setCommandFeedback(status, message) {
+  commandFeedback.classList.remove('accepted', 'rejected');
+  if (status === 'accepted' || status === 'rejected') commandFeedback.classList.add(status);
+  commandFeedback.textContent = message || '';
 }
 
 function persistLiveRun(payload) {
