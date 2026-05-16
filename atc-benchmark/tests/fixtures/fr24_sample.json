@@ -1,0 +1,1 @@
+{"data":[{"id":"fr1","callsign":"ETD202","icao24":"def456","origin":"OMAA","destination":"OOMS","aircraft_type":"B789","track":[{"ts":"2026-01-01T10:00:00Z","lat":24.42,"lon":54.36,"alt_ft":0,"gs_kt":15,"hdg":90,"vr_fpm":0,"gnd":true}]}]}
