@@ -51,6 +51,13 @@ def validate_actions(world: WorldState, actions: list[dict]) -> tuple[list[dict]
     projected_runway_release_sec = world.airport.runway_occupied_until_sec
     if world.airport.runway_occupied_by and projected_runway_release_sec is None:
         projected_runway_release_sec = projected_time + world.tick_sec
+    layout = world.airport.layout if isinstance(world.airport.layout, dict) else {}
+    known_waypoints = {
+        fix.get("id")
+        for key in ("fixes", "waypoints")
+        for fix in layout.get(key, [])
+        if isinstance(fix, dict) and isinstance(fix.get("id"), str)
+    }
     for action in actions:
         cs = action.get("aircraft")
         atype = action.get("type")
@@ -89,6 +96,19 @@ def validate_actions(world: WorldState, actions: list[dict]) -> tuple[list[dict]
                     reason = "arrival_too_close"
             elif atype == "go_around" and ac.status not in {"on_final", "airborne"}:
                 reason = "not_on_approach"
+            elif atype == "hold_at_waypoint":
+                if not isinstance(action.get("waypoint"), str) or not action.get("waypoint"):
+                    reason = "invalid_waypoint"
+                elif action.get("waypoint") not in known_waypoints:
+                    reason = "unknown_waypoint"
+                elif action.get("turn_direction") not in {"left", "right"}:
+                    reason = "invalid_turn_direction"
+                elif not isinstance(action.get("leg_length_nm"), (int, float)) or action.get("leg_length_nm") <= 0:
+                    reason = "invalid_leg_length"
+                elif not isinstance(action.get("hold_altitude_ft"), (int, float)) or action.get("hold_altitude_ft") < world.rules.min_altitude_ft:
+                    reason = "invalid_hold_altitude"
+            elif atype == "exit_hold" and ac.hold_fix_id is None:
+                reason = "not_in_hold"
         if reason:
             invalid.append({"action": action, "reason": reason})
         else:
