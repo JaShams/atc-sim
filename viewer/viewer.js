@@ -52,6 +52,15 @@ let currentMode = 'replay';
 let liveSocket = null;
 let livePollTimer = null;
 let liveSessionId = null;
+let liveFrameHandle = null;
+let liveSnapshotsByCallsign = new Map();
+let latestLiveArrivalMs = 0;
+
+const LIVE_INTERPOLATION = {
+  lagMs: 220,
+  maxFrameDeltaMs: 120,
+  maxHoldMs: 2200
+};
 
 const palette = {
   normal: '#2563eb',
@@ -173,6 +182,7 @@ const VALIDATOR_REASON_MESSAGES = {
 renderRadarLegend();
 handleModeChange();
 syncCommandFormForType();
+startLiveFrameLoop();
 
 async function loadFiles() {
   if (!traceFileInput.files[0]) return;
@@ -265,6 +275,7 @@ function handleLiveEnvelope(payload) {
   }
   const event = payload.tick || payload;
   if (!event?.state) return;
+  ingestLiveSnapshots(event);
   traceEvents.push(event);
   slider.disabled = false;
   playPause.disabled = false;
@@ -279,6 +290,37 @@ function handleLiveEnvelope(payload) {
   renderAtTick(traceEvents.length - 1);
   renderTimeline();
   populateAircraftSelector(event);
+}
+
+function ingestLiveSnapshots(event) {
+  const now = performance.now();
+  latestLiveArrivalMs = now;
+  const aircraft = Object.values(event.state?.aircraft || {});
+  const seen = new Set();
+  aircraft.forEach((ac) => {
+    const callsign = ac.callsign;
+    if (!callsign) return;
+    seen.add(callsign);
+    const snapshot = { ...ac, __arrivalMs: now };
+    const prev = liveSnapshotsByCallsign.get(callsign);
+    liveSnapshotsByCallsign.set(callsign, { previous: prev?.target || snapshot, target: snapshot });
+  });
+  for (const callsign of liveSnapshotsByCallsign.keys()) {
+    if (!seen.has(callsign)) liveSnapshotsByCallsign.delete(callsign);
+  }
+}
+
+function startLiveFrameLoop() {
+  let prevFrame = performance.now();
+  const frame = (ts) => {
+    const dt = Math.min(LIVE_INTERPOLATION.maxFrameDeltaMs, Math.max(0, ts - prevFrame));
+    prevFrame = ts;
+    if (currentMode === 'live' && traceEvents.length) {
+      drawCurrentRadar(ts, dt);
+    }
+    liveFrameHandle = requestAnimationFrame(frame);
+  };
+  liveFrameHandle = requestAnimationFrame(frame);
 }
 
 function populateAircraftSelector(event) {
@@ -993,11 +1035,56 @@ function hideRadarTooltip() {
   drawCurrentRadar();
 }
 
-function drawCurrentRadar() {
+function drawCurrentRadar(frameTs = performance.now(), frameDeltaMs = 0) {
   const event = traceEvents[currentTickIndex];
   if (!event) return;
-  const aircraft = Object.values(event.state?.aircraft || {});
+  const aircraft = currentMode === 'live'
+    ? buildInterpolatedAircraft(event, frameTs, frameDeltaMs)
+    : Object.values(event.state?.aircraft || {});
   drawRadar(event.state || {}, aircraft, aircraftSetFromRecords(event.conflicts || []), aircraftSetFromRecords(event.predicted_conflicts || []), event.conflicts || [], event.predicted_conflicts || []);
+}
+
+function buildInterpolatedAircraft(event, frameTs, frameDeltaMs) {
+  const fallback = Object.values(event.state?.aircraft || {});
+  if (!fallback.length) return fallback;
+  const delayed = latestLiveArrivalMs && (frameTs - latestLiveArrivalMs) > LIVE_INTERPOLATION.maxHoldMs;
+  return fallback.map((ac) => {
+    const pair = liveSnapshotsByCallsign.get(ac.callsign);
+    if (!pair?.target) return ac;
+    const previous = pair.previous || pair.target;
+    const target = pair.target;
+    const span = Math.max(1, target.__arrivalMs - previous.__arrivalMs);
+    let alpha = (frameTs - LIVE_INTERPOLATION.lagMs - previous.__arrivalMs) / span;
+    if (delayed) {
+      const slowdown = Math.max(0.08, 1 - (frameDeltaMs / LIVE_INTERPOLATION.maxFrameDeltaMs));
+      alpha *= slowdown;
+    }
+    alpha = Math.max(0, Math.min(1, alpha));
+    if (delayed && alpha > 0.995) alpha = 0.995;
+    return {
+      ...target,
+      x_nm: lerpNumber(previous.x_nm, target.x_nm, alpha),
+      y_nm: lerpNumber(previous.y_nm, target.y_nm, alpha),
+      altitude_ft: lerpNumber(previous.altitude_ft, target.altitude_ft, alpha),
+      speed_kt: lerpNumber(previous.speed_kt, target.speed_kt, alpha),
+      heading_deg: lerpHeading(previous.heading_deg, target.heading_deg, alpha)
+    };
+  });
+}
+
+function lerpNumber(a, b, alpha) {
+  const x = Number(a);
+  const y = Number(b);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return Number.isFinite(y) ? y : x;
+  return x + (y - x) * alpha;
+}
+
+function lerpHeading(a, b, alpha) {
+  const from = Number(a);
+  const to = Number(b);
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return Number.isFinite(to) ? to : from;
+  let delta = ((to - from + 540) % 360) - 180;
+  return (from + delta * alpha + 360) % 360;
 }
 
 function startRadarPan(event) {
