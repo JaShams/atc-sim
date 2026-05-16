@@ -193,3 +193,41 @@ def test_debug_mode_requires_trigger_provenance(tmp_path, monkeypatch):
 
     with __import__("pytest").raises(ValueError, match="Missing trigger provenance"):
         run(world, NoopAgent(), max_ticks=1, trace_path=tmp_path / "trace.jsonl")
+
+
+def test_airborne_assignment_actions_are_delayed_until_scheduled_time(tmp_path):
+    world = _world_for_predicted_conflict_tests()
+    world.rules.pilot_readback_delay_sec = {"min": 5, "max": 5}
+    world.rules.command_delay_seed = 7
+    initial_heading = world.aircraft["A1"].heading_deg
+    initial_alt = world.aircraft["A1"].target_altitude_ft
+    initial_speed = world.aircraft["A1"].speed_kt
+    agent = ScriptedAgent(
+        [[
+            {"aircraft": "A1", "type": "assign_heading", "heading": 90},
+            {"aircraft": "A2", "type": "assign_altitude", "altitude_ft": 5500},
+            {"aircraft": "A3", "type": "assign_speed", "speed_kt": 200},
+        ]]
+    )
+    trace = tmp_path / "trace.jsonl"
+    run(world, ScriptedAgent([agent.actions_per_tick[0], []]), max_ticks=2, trace_path=trace)
+    first_tick_state = __import__("json").loads(trace.read_text(encoding="utf-8").splitlines()[0])["state"]["aircraft"]["A1"]
+    assert first_tick_state["heading_deg"] == initial_heading
+    assert first_tick_state["target_altitude_ft"] == initial_alt
+    assert first_tick_state["speed_kt"] == initial_speed
+
+    assert world.aircraft["A1"].heading_deg == 90
+    assert world.aircraft["A2"].target_altitude_ft == 5500
+    assert world.aircraft["A3"].speed_kt == 200
+
+
+def test_delay_sampling_is_deterministic_with_seeded_randomness(tmp_path):
+    def _run_with_seed(seed: int) -> tuple[float, float]:
+        world = _world_for_predicted_conflict_tests()
+        world.rules.pilot_readback_delay_sec = {"min": 0, "max": 10}
+        world.rules.command_delay_seed = seed
+        agent = ScriptedAgent([[{"aircraft": "A1", "type": "assign_heading", "heading": 90}]])
+        run(world, agent, max_ticks=3, trace_path=tmp_path / f"trace-{seed}.jsonl")
+        return world.aircraft["A1"].x_nm, world.aircraft["A1"].y_nm
+
+    assert _run_with_seed(123) == _run_with_seed(123)
