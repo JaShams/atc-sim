@@ -15,7 +15,8 @@ from atc_benchmark.agents.llm_agent import LLMAgent
 from atc_benchmark.agents.noop_agent import NoOpAgent
 from atc_benchmark.agents.random_valid_action_agent import RandomValidActionAgent
 from atc_benchmark.paths import resolve_scenario_path
-from atc_benchmark.simulator.engine import load_world, run, scenario_hash
+from atc_benchmark.runner.game_session import GameSession
+from atc_benchmark.simulator.engine import load_world, scenario_hash
 
 
 def build_agent(name: str, *, human_timeout_sec: float = 30.0, human_max_retries: int = 3):
@@ -128,21 +129,24 @@ def main() -> None:
         human_timeout_sec=args.human_timeout_sec,
         human_max_retries=args.human_max_retries,
     )
-    result = run(
+    session = GameSession(
         world,
         build_agent(
             args.agent,
             human_timeout_sec=args.human_timeout_sec,
             human_max_retries=args.human_max_retries,
         ),
-        args.max_ticks,
-        Path(args.trace),
+        max_ticks=args.max_ticks,
+        trace_path=Path(args.trace),
         manifest=manifest,
     )
+    print(session.start_briefing())
+    result = session.run()
     score_path = Path(args.score)
     score_path.parent.mkdir(parents=True, exist_ok=True)
     score_path.write_text(json.dumps(result, indent=2))
     print(json.dumps(result, indent=2))
+    print(session.mission_debrief(result).format())
 
 
 if __name__ == "__main__":
