@@ -53,4 +53,6 @@ def test_scenario_build_and_validate() -> None:
     scenario = build_scenario(window, ScenarioSeedConfig(runway_id="13", active_runway="13"))
     assert scenario["airport"]["runway_id"] == "13"
     assert isinstance(scenario["aircraft"][0]["speed_kt"], float)
+    assert "aircraft_type" in scenario["aircraft"][0]
+    assert "wake_category" in scenario["aircraft"][0]
     validate_scenario_document(scenario)
