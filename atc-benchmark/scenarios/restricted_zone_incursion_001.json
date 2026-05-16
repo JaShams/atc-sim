@@ -42,5 +42,24 @@
       "status": "airborne",
       "target_runway": "27"
     }
-  ]
+  ],
+  "scenario_metadata": {
+    "tags": [
+      "safety"
+    ],
+    "difficulty_tier": "intro",
+    "intended_stressors": [
+      "restricted zone avoidance"
+    ],
+    "expected_baseline_ranges": {
+      "score": [
+        0,
+        100
+      ],
+      "restricted_zone_violation_count": [
+        1,
+        10
+      ]
+    }
+  }
 }

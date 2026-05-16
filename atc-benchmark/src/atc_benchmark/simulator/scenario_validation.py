@@ -155,6 +155,38 @@ def _validate_airport_layout(layout: Any, errors: list[str]) -> None:
             _validate_id(runway.get("id"), label, errors)
             _validate_point_list(runway.get("ends"), f"{label}.ends", 2, errors, exact=True)
             _validate_optional_width(runway, label, errors)
+            if "ils_centerline" in runway:
+                ils = runway.get("ils_centerline")
+                if not isinstance(ils, Mapping):
+                    errors.append(f"{label}.ils_centerline must be an object")
+                else:
+                    _validate_point(ils.get("start"), f"{label}.ils_centerline.start", errors)
+                    _validate_point(ils.get("end"), f"{label}.ils_centerline.end", errors)
+            if "final_approach_envelope" in runway:
+                env = runway.get("final_approach_envelope")
+                if not isinstance(env, Mapping):
+                    errors.append(f"{label}.final_approach_envelope must be an object")
+                else:
+                    if not _is_non_negative_number(env.get("max_distance_nm")):
+                        errors.append(f"{label}.final_approach_envelope.max_distance_nm must be non-negative")
+                    for field in ("min_altitude_ft", "max_altitude_ft"):
+                        if field in env and not _is_non_negative_number(env.get(field)):
+                            errors.append(f"{label}.final_approach_envelope.{field} must be non-negative")
+
+    parallel_pairs = layout.get("parallel_runway_pairs", [])
+    if not isinstance(parallel_pairs, list):
+        errors.append("airport.layout.parallel_runway_pairs must be a list when present")
+    else:
+        for idx, pair in enumerate(parallel_pairs):
+            label = f"airport.layout.parallel_runway_pairs[{idx}]"
+            if not isinstance(pair, Mapping):
+                errors.append(f"{label} must be an object")
+                continue
+            for field in ("runway_a", "runway_b"):
+                if not isinstance(pair.get(field), str) or not pair[field].strip():
+                    errors.append(f"{label}.{field} must be a non-empty string")
+            if "established_tolerance_nm" in pair and not _is_non_negative_number(pair.get("established_tolerance_nm")):
+                errors.append(f"{label}.established_tolerance_nm must be non-negative")
 
     taxiways = layout.get("taxiways", [])
     if not isinstance(taxiways, list):
