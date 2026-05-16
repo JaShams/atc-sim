@@ -140,10 +140,21 @@ def _validate_trigger_context(trigger_context: dict) -> bool:
     return required.issubset(provenance.keys())
 
 
+def _named_fix_lookup(world: WorldState) -> dict[str, tuple[float, float]]:
+    fixes: dict[str, tuple[float, float]] = {}
+    layout = world.airport.layout if isinstance(world.airport.layout, dict) else {}
+    for source in (layout.get("fixes", []), layout.get("waypoints", [])):
+        if isinstance(source, list):
+            for fix in source:
+                if isinstance(fix, dict) and isinstance(fix.get("id"), str):
+                    fixes[fix["id"]] = (float(fix["x_nm"]), float(fix["y_nm"]))
+    return fixes
+
+
 def advance(world: WorldState) -> None:
     dt_hr = world.tick_sec / 3600
     for ac in world.aircraft.values():
-        if ac.status in {"airborne", "on_final", "go_around", "rolling", "airborne_departure"}:
+        if ac.status in {"airborne", "on_final", "go_around", "rolling", "airborne_departure", "holding"}:
             rad = math.radians(ac.heading_deg)
             wind_to_deg = (world.weather.wind_dir_deg + 180) % 360
             wind_rad = math.radians(wind_to_deg)
@@ -151,6 +162,33 @@ def advance(world: WorldState) -> None:
             ground_vy_kt = math.cos(rad) * ac.speed_kt + math.cos(wind_rad) * world.weather.wind_speed_kt
             ac.x_nm += ground_vx_kt * dt_hr
             ac.y_nm += ground_vy_kt * dt_hr
+            leg_nm = math.hypot(ground_vx_kt * dt_hr, ground_vy_kt * dt_hr)
+            if ac.hold_fix_id and ac.hold_fix_x_nm is not None and ac.hold_fix_y_nm is not None:
+                ac.status = "holding"
+                if ac.hold_phase in {None, "outbound"}:
+                    ac.hold_phase = "outbound"
+                    ac.hold_leg_progress_nm += leg_nm
+                    if ac.hold_leg_progress_nm >= (ac.hold_leg_length_nm or 0):
+                        ac.hold_phase = "turn_to_inbound"
+                        ac.hold_leg_progress_nm = 0.0
+                        ac.hold_turn_remaining_deg = 180.0
+                elif ac.hold_phase == "turn_to_inbound":
+                    turn_delta = min(ac.hold_turn_remaining_deg, 3.0 * world.tick_sec)
+                    sign = 1 if ac.hold_turn_direction == "right" else -1
+                    ac.heading_deg = (ac.heading_deg + sign * turn_delta) % 360
+                    ac.hold_turn_remaining_deg = max(0.0, ac.hold_turn_remaining_deg - turn_delta)
+                    if ac.hold_turn_remaining_deg <= 0:
+                        bearing = math.degrees(math.atan2(ac.hold_fix_x_nm - ac.x_nm, ac.hold_fix_y_nm - ac.y_nm)) % 360
+                        ac.heading_deg = bearing
+                        ac.hold_phase = "inbound"
+                elif ac.hold_phase == "inbound":
+                    bearing = math.degrees(math.atan2(ac.hold_fix_x_nm - ac.x_nm, ac.hold_fix_y_nm - ac.y_nm)) % 360
+                    ac.heading_deg = bearing
+                    if math.hypot(ac.hold_fix_x_nm - ac.x_nm, ac.hold_fix_y_nm - ac.y_nm) < 0.5:
+                        ac.hold_phase = "outbound"
+                        ac.hold_leg_progress_nm = 0.0
+                        outbound = (bearing + 180) % 360
+                        ac.heading_deg = outbound
             previous_altitude = ac.altitude_ft
             ac.altitude_ft += ac.vertical_rate_fpm * (world.tick_sec / 60)
             if ac.target_altitude_ft is not None:
@@ -216,6 +254,7 @@ def _detect_restricted_zone_crossings(world: WorldState, prior_positions: dict[s
 
 def apply_actions(world: WorldState, actions: list[dict]) -> dict:
     go_arounds = 0
+    fix_lookup = _named_fix_lookup(world)
     for action in actions:
         ac = world.aircraft[action["aircraft"]]
         t = action["type"]
@@ -246,6 +285,33 @@ def apply_actions(world: WorldState, actions: list[dict]) -> dict:
             go_arounds += 1
         elif t in {"hold_short", "hold_position"}:
             ac.speed_kt = 0
+        elif t == "hold_at_waypoint":
+            waypoint = action["waypoint"]
+            fx, fy = fix_lookup[waypoint]
+            ac.hold_fix_id = waypoint
+            ac.hold_fix_x_nm = fx
+            ac.hold_fix_y_nm = fy
+            ac.hold_leg_length_nm = float(action["leg_length_nm"])
+            ac.hold_turn_direction = action["turn_direction"]
+            ac.hold_altitude_ft = float(action["hold_altitude_ft"])
+            ac.target_altitude_ft = ac.hold_altitude_ft
+            ac.vertical_rate_fpm = 1500 if ac.hold_altitude_ft > ac.altitude_ft else -1500 if ac.hold_altitude_ft < ac.altitude_ft else 0
+            ac.hold_phase = "inbound"
+            ac.hold_leg_progress_nm = 0.0
+            ac.hold_turn_remaining_deg = 0.0
+            ac.status = "holding"
+        elif t == "exit_hold":
+            ac.hold_fix_id = None
+            ac.hold_fix_x_nm = None
+            ac.hold_fix_y_nm = None
+            ac.hold_leg_length_nm = None
+            ac.hold_turn_direction = None
+            ac.hold_altitude_ft = None
+            ac.hold_phase = None
+            ac.hold_leg_progress_nm = 0.0
+            ac.hold_turn_remaining_deg = 0.0
+            if ac.status == "holding":
+                ac.status = "airborne"
         elif t == "no_op":
             continue
     return {"go_around_count": go_arounds}
@@ -650,10 +716,15 @@ def load_world(path: Path) -> WorldState:
         if aircraft.role == "departure" and aircraft.status == "waiting_departure" and aircraft.ready_time_sec is None:
             aircraft.ready_time_sec = 0
     scoring_data = data.get("scoring", {})
+    airport_data = dict(data["airport"])
+    if data.get("waypoints"):
+        layout = dict(airport_data.get("layout") or {})
+        layout["waypoints"] = data["waypoints"]
+        airport_data["layout"] = layout
     return WorldState(
         time_sec=0,
         tick_sec=data.get("tick_sec", 5),
-        airport=AirportState(**data["airport"]),
+        airport=AirportState(**airport_data),
         weather=Weather(**data.get("weather", {})),
         rules=RulesConfig(**data.get("rules", {})),
         scoring=ScoringConfig(**scoring_data),

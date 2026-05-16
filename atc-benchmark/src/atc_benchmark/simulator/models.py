@@ -12,6 +12,8 @@ ALLOWED_ACTION_TYPES = {
     "go_around",
     "hold_short",
     "hold_position",
+    "hold_at_waypoint",
+    "exit_hold",
     "no_op",
 }
 
@@ -38,6 +40,15 @@ class Aircraft:
     landing_time_sec: int | None = None
     ideal_takeoff_time_sec: int | None = None
     ideal_landing_time_sec: int | None = None
+    hold_fix_id: str | None = None
+    hold_fix_x_nm: float | None = None
+    hold_fix_y_nm: float | None = None
+    hold_leg_length_nm: float | None = None
+    hold_turn_direction: str | None = None
+    hold_altitude_ft: float | None = None
+    hold_phase: str | None = None
+    hold_leg_progress_nm: float = 0.0
+    hold_turn_remaining_deg: float = 0.0
 
 
 @dataclass

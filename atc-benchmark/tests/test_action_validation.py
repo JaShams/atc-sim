@@ -74,6 +74,8 @@ def test_every_allowed_action_is_applied_or_explicitly_rejected():
     # Keep runway unavailable so runway-clearance actions are deterministically rejected.
     world.airport.runway_occupied_by = "ARR1"
     world.airport.runway_occupied_until_sec = world.time_sec + world.tick_sec
+    world.airport.layout = {"waypoints": [{"id": "HOLD1", "x_nm": -5.0, "y_nm": 5.0}]}
+    world.aircraft["ARR1"].hold_fix_id = "HOLD1"
 
     sample_actions = {
         "assign_heading": {"aircraft": "ARR1", "type": "assign_heading", "heading": 180},
@@ -84,6 +86,15 @@ def test_every_allowed_action_is_applied_or_explicitly_rejected():
         "go_around": {"aircraft": "ARR1", "type": "go_around"},
         "hold_short": {"aircraft": "DEP1", "type": "hold_short"},
         "hold_position": {"aircraft": "DEP1", "type": "hold_position"},
+        "hold_at_waypoint": {
+            "aircraft": "ARR1",
+            "type": "hold_at_waypoint",
+            "waypoint": "HOLD1",
+            "leg_length_nm": 3.0,
+            "turn_direction": "right",
+            "hold_altitude_ft": 4000,
+        },
+        "exit_hold": {"aircraft": "ARR1", "type": "exit_hold"},
         "no_op": {"aircraft": "ARR1", "type": "no_op"},
     }
     engine_applied_types = {
@@ -95,6 +106,8 @@ def test_every_allowed_action_is_applied_or_explicitly_rejected():
         "go_around",
         "hold_short",
         "hold_position",
+        "hold_at_waypoint",
+        "exit_hold",
         "no_op",
     }
 
