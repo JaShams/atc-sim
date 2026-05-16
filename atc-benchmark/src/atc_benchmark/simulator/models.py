@@ -12,6 +12,7 @@ ALLOWED_ACTION_TYPES = {
     "go_around",
     "hold_short",
     "hold_position",
+    "resume_procedure",
     "no_op",
 }
 
@@ -38,6 +39,13 @@ class Aircraft:
     landing_time_sec: int | None = None
     ideal_takeoff_time_sec: int | None = None
     ideal_landing_time_sec: int | None = None
+    route_id: str | None = None
+    procedure_type: str | None = None
+    waypoints: list[dict[str, Any]] = field(default_factory=list)
+    current_leg_index: int = 0
+    current_leg_completed: bool = False
+    managed_route_active: bool = True
+    manual_override_until_sec: int | None = None
 
 
 @dataclass

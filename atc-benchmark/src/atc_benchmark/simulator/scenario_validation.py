@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 ALLOWED_AIRCRAFT_ROLES = {"arrival", "departure"}
+ALLOWED_PROCEDURE_TYPES = {"SID", "STAR"}
 ALLOWED_AIRCRAFT_STATUSES = {
     "airborne",
     "on_final",
@@ -260,7 +261,48 @@ def _validate_aircraft(aircraft: Any, errors: list[str]) -> set[str]:
             errors.append(f"{label}.heading_deg must be in [0, 359]")
         if ac.get("target_runway") is not None and not _is_runway_id(ac.get("target_runway")):
             errors.append(f"{label}.target_runway must be null or a runway number string from '01' to '36'")
+        _validate_aircraft_route(ac, label, errors)
     return callsigns
+
+
+def _validate_aircraft_route(ac: Mapping[str, Any], label: str, errors: list[str]) -> None:
+    route_id = ac.get("route_id")
+    procedure_type = ac.get("procedure_type")
+    waypoints = ac.get("waypoints")
+    if route_id is None and procedure_type is None and waypoints is None:
+        return
+    if not isinstance(route_id, str) or not route_id.strip():
+        errors.append(f"{label}.route_id must be a non-empty string when route is provided")
+    if procedure_type not in ALLOWED_PROCEDURE_TYPES:
+        errors.append(f"{label}.procedure_type must be one of {sorted(ALLOWED_PROCEDURE_TYPES)}")
+    if not isinstance(waypoints, list) or len(waypoints) < 1:
+        errors.append(f"{label}.waypoints must be a non-empty list when route is provided")
+        return
+    for wp_idx, wp in enumerate(waypoints):
+        wp_label = f"{label}.waypoints[{wp_idx}]"
+        if not isinstance(wp, Mapping):
+            errors.append(f"{wp_label} must be an object")
+            continue
+        for field in ("name", "x_nm", "y_nm"):
+            if field not in wp:
+                errors.append(f"{wp_label} missing required field '{field}'")
+        if "name" in wp and (not isinstance(wp["name"], str) or not wp["name"].strip()):
+            errors.append(f"{wp_label}.name must be a non-empty string")
+        for field in ("x_nm", "y_nm", "min_altitude_ft", "max_altitude_ft", "speed_kt"):
+            if field in wp and not _is_number(wp[field]):
+                errors.append(f"{wp_label}.{field} must be numeric when present")
+        if _is_number(wp.get("min_altitude_ft")) and wp["min_altitude_ft"] < 0:
+            errors.append(f"{wp_label}.min_altitude_ft must be non-negative")
+        if _is_number(wp.get("max_altitude_ft")) and wp["max_altitude_ft"] < 0:
+            errors.append(f"{wp_label}.max_altitude_ft must be non-negative")
+        if _is_number(wp.get("min_altitude_ft")) and _is_number(wp.get("max_altitude_ft")) and wp["min_altitude_ft"] > wp["max_altitude_ft"]:
+            errors.append(f"{wp_label}.min_altitude_ft must be <= max_altitude_ft")
+    if "current_leg_index" in ac:
+        idx = ac["current_leg_index"]
+        if not isinstance(idx, int) or not (0 <= idx <= len(waypoints)):
+            errors.append(f"{label}.current_leg_index must be an integer in [0, len(waypoints)]")
+    if "current_leg_completed" in ac and not isinstance(ac["current_leg_completed"], bool):
+        errors.append(f"{label}.current_leg_completed must be boolean when present")
 
 
 def _validate_departure_queue(airport: Any, callsigns: set[str], errors: list[str]) -> None:

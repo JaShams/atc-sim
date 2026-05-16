@@ -84,6 +84,7 @@ def test_every_allowed_action_is_applied_or_explicitly_rejected():
         "go_around": {"aircraft": "ARR1", "type": "go_around"},
         "hold_short": {"aircraft": "DEP1", "type": "hold_short"},
         "hold_position": {"aircraft": "DEP1", "type": "hold_position"},
+        "resume_procedure": {"aircraft": "ARR1", "type": "resume_procedure"},
         "no_op": {"aircraft": "ARR1", "type": "no_op"},
     }
     engine_applied_types = {
@@ -95,6 +96,7 @@ def test_every_allowed_action_is_applied_or_explicitly_rejected():
         "go_around",
         "hold_short",
         "hold_position",
+        "resume_procedure",
         "no_op",
     }
 
