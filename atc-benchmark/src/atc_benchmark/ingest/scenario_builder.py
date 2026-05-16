@@ -9,6 +9,17 @@ from .models import FetchedTrafficWindow, FlightTrack, ScenarioSeedConfig
 NM_PER_LAT_DEG = 60.0
 
 
+def _infer_wake_category(aircraft_type: str | None) -> str | None:
+    if not aircraft_type:
+        return None
+    ac_type = aircraft_type.strip().upper()
+    if ac_type in {"A380", "B777", "A350"}:
+        return "heavy"
+    if ac_type.startswith("A3") or ac_type.startswith("B7"):
+        return "medium"
+    return "light"
+
+
 def latlon_to_local_nm(lat: float, lon: float, origin_lat: float, origin_lon: float) -> tuple[float, float]:
     y_nm = (lat - origin_lat) * NM_PER_LAT_DEG
     x_nm = (lon - origin_lon) * NM_PER_LAT_DEG * cos(radians(origin_lat))
@@ -52,6 +63,8 @@ def build_scenario(window: FetchedTrafficWindow, config: ScenarioSeedConfig) -> 
                 "altitude_ft": max(0.0, float(p.altitude_ft)),
                 "speed_kt": max(0.0, float(p.ground_speed_kt)),
                 "heading_deg": float(p.track_deg) % 360,
+                "aircraft_type": track.aircraft_type,
+                "wake_category": _infer_wake_category(track.aircraft_type),
                 "vertical_rate_fpm": float(p.vertical_rate_fpm),
                 "status": status,
                 "target_runway": config.default_target_runway or config.active_runway,

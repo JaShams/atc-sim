@@ -28,9 +28,10 @@ def test_predict_conflict_uses_lookahead_window():
     world.aircraft["ARR1"].heading_deg = world.aircraft["ARR2"].heading_deg = 90
     world.aircraft["ARR1"].speed_kt = world.aircraft["ARR2"].speed_kt = 220
     preds = predict_conflicts(world)
-    assert isinstance(preds, list)
-    if preds:
-        assert min(p["in_seconds"] for p in preds) <= 120
+    assert preds
+    assert min(p["in_seconds"] for p in preds) <= 120
+
+
 def test_parallel_ils_exception_applies_when_established_on_distinct_centerlines():
     world = load_world(resolve_scenario_path("scenarios/crossing_conflict_001.json"))
     world.airport.layout = {
@@ -83,3 +84,43 @@ def test_parallel_ils_exception_not_applied_for_near_miss_not_established():
     arr2.x_nm, arr2.y_nm, arr2.altitude_ft, arr2.target_runway = 0.05, -4.2, 3100, "10"
     conflicts = detect_conflicts(world)
     assert conflicts
+
+
+def test_wake_trailing_heavy_requires_extended_minimum() -> None:
+    world = load_world(resolve_scenario_path("scenarios/crossing_conflict_001.json"))
+    leader = world.aircraft["ARR1"]
+    follower = world.aircraft["ARR2"]
+    leader.aircraft_type = "B777"
+    leader.wake_category = "heavy"
+    leader.x_nm = 0.0
+    leader.y_nm = 5.0
+    leader.heading_deg = 0.0
+    leader.altitude_ft = 5000.0
+    follower.wake_category = "light"
+    follower.x_nm = 0.0
+    follower.y_nm = -1.0
+    follower.heading_deg = 0.0
+    follower.altitude_ft = 5000.0
+
+    conflicts = detect_conflicts(world)
+    assert conflicts
+    assert conflicts[0]["required_horizontal_nm"] == 7.0
+
+
+def test_non_heavy_baseline_minimum_is_unchanged() -> None:
+    world = load_world(resolve_scenario_path("scenarios/crossing_conflict_001.json"))
+    a = world.aircraft["ARR1"]
+    b = world.aircraft["ARR2"]
+    a.aircraft_type = "A320"
+    a.wake_category = "medium"
+    a.x_nm = 0.0
+    a.y_nm = 0.0
+    a.altitude_ft = 5000.0
+    b.wake_category = "light"
+    b.x_nm = 2.5
+    b.y_nm = 0.0
+    b.altitude_ft = 5000.0
+
+    conflicts = detect_conflicts(world)
+    assert conflicts
+    assert conflicts[0]["required_horizontal_nm"] == world.rules.min_horizontal_nm

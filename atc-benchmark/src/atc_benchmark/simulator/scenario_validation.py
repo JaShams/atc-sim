@@ -295,6 +295,18 @@ def _validate_rules(rules: Any, errors: list[str]) -> None:
             errors.append(f"rules.{field} must be numeric")
     if _is_number(rules.get("min_speed_kt")) and _is_number(rules.get("max_speed_kt")) and rules["min_speed_kt"] > rules["max_speed_kt"]:
         errors.append("rules.min_speed_kt must be <= rules.max_speed_kt")
+    if "restricted_zones" in rules:
+        zones = rules["restricted_zones"]
+        if not isinstance(zones, list):
+            errors.append("rules.restricted_zones must be a list")
+        else:
+            for idx, zone in enumerate(zones):
+                label = f"rules.restricted_zones[{idx}]"
+                if not isinstance(zone, Mapping):
+                    errors.append(f"{label} must be an object")
+                    continue
+                _validate_id(zone.get("id"), label, errors)
+                _validate_point_list(zone.get("vertices"), f"{label}.vertices", 3, errors)
 
 
 def _validate_scoring(scoring: Any, errors: list[str]) -> None:

@@ -25,6 +25,8 @@ class Aircraft:
     altitude_ft: float
     speed_kt: float
     heading_deg: float
+    wake_category: str | None = None
+    aircraft_type: str | None = None
     vertical_rate_fpm: float = 0.0
     status: str = "airborne"
     target_runway: str | None = None
@@ -70,6 +72,7 @@ class RulesConfig:
     outcome_window_epsilon: float = 0.02
     outcome_normalization_floor: float = 1.0
     debug_require_trigger_provenance: bool = False
+    restricted_zones: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -89,6 +92,7 @@ class ScoringConfig:
     emergency_unhandled_penalty: float = -12.0
     emergency_priority_compliance_reward: float = 2.5
     emergency_priority_violation_penalty: float = -4.0
+    restricted_zone_violation_penalty: float = -10.0
 
 
 @dataclass

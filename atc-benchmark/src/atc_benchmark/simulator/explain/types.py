@@ -33,6 +33,7 @@ class ScoreComponentId:
     EMERGENCY_HANDLED = "emergency_handled"
     EMERGENCY_UNHANDLED = "emergency_unhandled"
     EMERGENCY_PRIORITY_COMPLIANCE = "emergency_priority_compliance"
+    RESTRICTED_ZONE_VIOLATION = "restricted_zone_violation"
 
 
 @dataclass

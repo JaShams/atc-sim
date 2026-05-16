@@ -1,0 +1,65 @@
+{
+  "tick_sec": 5,
+  "airport": {
+    "runway_id": "27",
+    "active_runway": "27",
+    "departure_queue": []
+  },
+  "rules": {
+    "restricted_zones": [
+      {
+        "id": "RZ-ALPHA",
+        "vertices": [
+          {
+            "x_nm": -1.0,
+            "y_nm": -0.5
+          },
+          {
+            "x_nm": 1.0,
+            "y_nm": -0.5
+          },
+          {
+            "x_nm": 1.0,
+            "y_nm": 1.5
+          },
+          {
+            "x_nm": -1.0,
+            "y_nm": 1.5
+          }
+        ]
+      }
+    ]
+  },
+  "aircraft": [
+    {
+      "callsign": "ARR_RZ1",
+      "role": "arrival",
+      "x_nm": 0.0,
+      "y_nm": -0.8,
+      "altitude_ft": 2500,
+      "speed_kt": 240,
+      "heading_deg": 0,
+      "status": "airborne",
+      "target_runway": "27"
+    }
+  ],
+  "scenario_metadata": {
+    "tags": [
+      "safety"
+    ],
+    "difficulty_tier": "intro",
+    "intended_stressors": [
+      "restricted zone avoidance"
+    ],
+    "expected_baseline_ranges": {
+      "score": [
+        0,
+        100
+      ],
+      "restricted_zone_violation_count": [
+        1,
+        10
+      ]
+    }
+  }
+}

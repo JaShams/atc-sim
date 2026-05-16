@@ -175,6 +175,45 @@ def advance(world: WorldState) -> None:
             ac.status = "exited_airspace"
 
 
+
+def _point_in_polygon(x_nm: float, y_nm: float, vertices: list[dict]) -> bool:
+    inside = False
+    j = len(vertices) - 1
+    for i in range(len(vertices)):
+        xi = vertices[i]["x_nm"]
+        yi = vertices[i]["y_nm"]
+        xj = vertices[j]["x_nm"]
+        yj = vertices[j]["y_nm"]
+        intersects = ((yi > y_nm) != (yj > y_nm)) and (x_nm < (xj - xi) * (y_nm - yi) / ((yj - yi) or 1e-12) + xi)
+        if intersects:
+            inside = not inside
+        j = i
+    return inside
+
+
+def _detect_restricted_zone_crossings(world: WorldState, prior_positions: dict[str, tuple[float, float]], violated: set[tuple[str, str]]) -> list[dict]:
+    events: list[dict] = []
+    zones = world.rules.restricted_zones or []
+    for callsign, ac in world.aircraft.items():
+        previous = prior_positions.get(callsign)
+        if previous is None:
+            continue
+        for zone in zones:
+            zone_id = zone["id"]
+            key = (callsign, zone_id)
+            prev_inside = _point_in_polygon(previous[0], previous[1], zone["vertices"])
+            now_inside = _point_in_polygon(ac.x_nm, ac.y_nm, zone["vertices"])
+            if not prev_inside and now_inside and key not in violated:
+                violated.add(key)
+                events.append({
+                    "type": "restricted_zone_violation",
+                    "time_sec": world.time_sec + world.tick_sec,
+                    "aircraft": callsign,
+                    "zone_id": zone_id,
+                    "position_nm": {"x_nm": ac.x_nm, "y_nm": ac.y_nm},
+                })
+    return events
+
 def apply_actions(world: WorldState, actions: list[dict]) -> dict:
     go_arounds = 0
     for action in actions:
@@ -251,6 +290,7 @@ def _build_score_result(
     active_conflicts_count_total: int,
     predicted_conflicts_count_total: int,
     manifest: dict | None,
+    restricted_zone_violation_count: int,
 ) -> dict:
     conflict_introduced_count = lifecycle.transition_counts["introduced"]
     conflict_resolved_count = lifecycle.transition_counts["resolved"]
@@ -286,6 +326,7 @@ def _build_score_result(
             emergency_priority_compliant_count * scoring.emergency_priority_compliance_reward
             + emergency_priority_violation_count * scoring.emergency_priority_violation_penalty
         ),
+        ScoreComponentId.RESTRICTED_ZONE_VIOLATION: restricted_zone_violation_count * scoring.restricted_zone_violation_penalty,
     }
     raw_score = sum(score_breakdown.values())
     simulated_hours = world.time_sec / 3600 if world.time_sec > 0 else 0.0
@@ -322,6 +363,7 @@ def _build_score_result(
             "active_conflicts_count_total": active_conflicts_count_total,
             "predicted_conflicts_count_total": predicted_conflicts_count_total,
             "throughput_ops_per_hour": throughput_ops_per_hour,
+            "restricted_zone_violation_count": restricted_zone_violation_count,
         },
     }
     if manifest is not None:
@@ -429,6 +471,8 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
     emergency_priority_violation_count = 0
     active_conflicts_count_total = 0
     predicted_conflicts_count_total = 0
+    restricted_zone_violation_count = 0
+    violated_zone_entries: set[tuple[str, str]] = set()
     lifecycle = ConflictLifecycleTracker()
     cumulative_score_components = {
         ScoreComponentId.BASE_SCORE: world.scoring.base_score,
@@ -445,6 +489,7 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
         ScoreComponentId.EMERGENCY_HANDLED: 0.0,
         ScoreComponentId.EMERGENCY_UNHANDLED: 0.0,
         ScoreComponentId.EMERGENCY_PRIORITY_COMPLIANCE: 0.0,
+        ScoreComponentId.RESTRICTED_ZONE_VIOLATION: 0.0,
     }
     tick_records: list[dict] = []
 
@@ -550,7 +595,11 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
 
         if world.airport.runway_occupied_by and all(a.status in {"landed", "exited_airspace"} for a in world.aircraft.values()):
             break
+        prior_positions = {k: (a.x_nm, a.y_nm) for k, a in world.aircraft.items()}
         advance(world)
+        restricted_events = _detect_restricted_zone_crossings(world, prior_positions, violated_zone_entries)
+        restricted_zone_violation_count += len(restricted_events)
+        tick_records[-1]["triggered_events"].extend(restricted_events)
         world.time_sec += world.tick_sec
         if world.airport.runway_occupied_until_sec is not None and world.time_sec >= world.airport.runway_occupied_until_sec:
             world.airport.runway_occupied_by = None
@@ -582,6 +631,7 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
         active_conflicts_count_total=active_conflicts_count_total,
         predicted_conflicts_count_total=predicted_conflicts_count_total,
         manifest=manifest,
+        restricted_zone_violation_count=restricted_zone_violation_count,
     )
 
 
