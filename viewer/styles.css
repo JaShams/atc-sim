@@ -181,6 +181,25 @@ pre {
   font-weight: 650;
 }
 
+.command-hint {
+  margin: 8px 0 0;
+  font-size: 0.85rem;
+}
+
+.command-feedback {
+  margin: 8px 0 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.command-feedback.accepted {
+  color: var(--good);
+}
+
+.command-feedback.rejected {
+  color: var(--bad);
+}
+
 .summary-band {
   display: grid;
   grid-template-columns: minmax(260px, 1.5fr) minmax(280px, 1fr);
