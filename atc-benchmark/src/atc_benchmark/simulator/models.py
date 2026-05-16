@@ -25,6 +25,8 @@ class Aircraft:
     altitude_ft: float
     speed_kt: float
     heading_deg: float
+    wake_category: str | None = None
+    aircraft_type: str | None = None
     vertical_rate_fpm: float = 0.0
     status: str = "airborne"
     target_runway: str | None = None
