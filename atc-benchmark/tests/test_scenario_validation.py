@@ -24,8 +24,12 @@ def test_valid_airport_layout_passes():
                 "id": "09",
                 "ends": [{"x_nm": -2.5, "y_nm": 0.0}, {"x_nm": 2.5, "y_nm": 0.0}],
                 "width_nm": 0.08,
-            }
+                "ils_centerline": {"start": {"x_nm": 0.0, "y_nm": -10.0}, "end": {"x_nm": 0.0, "y_nm": 0.0}},
+                "final_approach_envelope": {"max_distance_nm": 10.0, "min_altitude_ft": 1500, "max_altitude_ft": 5000},
+            },
+            {"id": "10", "ends": [{"x_nm": 0.3, "y_nm": -2.5}, {"x_nm": 0.3, "y_nm": 2.5}], "ils_centerline": {"start": {"x_nm": 0.3, "y_nm": -10.0}, "end": {"x_nm": 0.3, "y_nm": 0.0}}, "final_approach_envelope": {"max_distance_nm": 10.0}}
         ],
+        "parallel_runway_pairs": [{"runway_a": "09", "runway_b": "10", "established_tolerance_nm": 0.15}],
         "taxiways": [
             {
                 "id": "A",
