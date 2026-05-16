@@ -148,6 +148,19 @@ def test_conflict_lifecycle_oscillating_commands_track_transitions(tmp_path):
     assert metrics["secondary_conflicts_created_count"] == metrics["conflict_reintroduced_count"]
 
 
+def test_restricted_zone_violation_updates_metrics_score_and_trace(tmp_path):
+    world = load_world(resolve_scenario_path("scenarios/restricted_zone_incursion_001.json"))
+    result = run(world, ScriptedAgent([]), max_ticks=4, trace_path=tmp_path / "trace.jsonl")
+    assert result["metrics"]["restricted_zone_violation_count"] >= 1
+    assert result["score_breakdown"]["restricted_zone_violation"] < 0
+    trace_rows = [json.loads(line) for line in (tmp_path / "trace.jsonl").read_text().splitlines()]
+    assert any(
+        event.get("type") == "restricted_zone_violation"
+        for row in trace_rows
+        for event in row.get("triggered_events", [])
+    )
+
+
 def test_secondary_conflict_chain_counts_reintroductions_only(tmp_path):
     world = _world_for_predicted_conflict_tests()
     world.aircraft["A3"].x_nm = 6.0

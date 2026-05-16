@@ -16,6 +16,23 @@ def test_valid_scenario_document_passes():
     validate_scenario_document(_valid_payload())
 
 
+def test_valid_restricted_zones_pass():
+    payload = _valid_payload()
+    payload["rules"] = {
+        "restricted_zones": [
+            {
+                "id": "RZ-1",
+                "vertices": [
+                    {"x_nm": -1.0, "y_nm": -1.0},
+                    {"x_nm": 1.0, "y_nm": -1.0},
+                    {"x_nm": 1.0, "y_nm": 1.0},
+                ],
+            }
+        ]
+    }
+    validate_scenario_document(payload)
+
+
 def test_valid_airport_layout_passes():
     payload = _valid_payload()
     payload["airport"]["layout"] = {
