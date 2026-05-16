@@ -148,6 +148,7 @@ def _validate_trigger_context(trigger_context: dict) -> bool:
 def advance(world: WorldState) -> None:
     dt_hr = world.tick_sec / 3600
     for ac in world.aircraft.values():
+        _update_managed_route(world, ac)
         if ac.status in {"airborne", "on_final", "go_around", "rolling", "airborne_departure"}:
             rad = math.radians(ac.heading_deg)
             wind_to_deg = (world.weather.wind_dir_deg + 180) % 360
@@ -179,6 +180,36 @@ def advance(world: WorldState) -> None:
         if ac.status == "airborne_departure" and (abs(ac.x_nm) > 30 or abs(ac.y_nm) > 30):
             ac.status = "exited_airspace"
 
+
+def _update_managed_route(world: WorldState, ac: Aircraft) -> None:
+    if not ac.waypoints or not ac.managed_route_active:
+        return
+    if ac.manual_override_until_sec is not None and world.time_sec < ac.manual_override_until_sec:
+        return
+    ac.manual_override_until_sec = None
+    if ac.current_leg_index >= len(ac.waypoints):
+        ac.current_leg_completed = True
+        return
+    wp = ac.waypoints[ac.current_leg_index]
+    dx = wp["x_nm"] - ac.x_nm
+    dy = wp["y_nm"] - ac.y_nm
+    dist = math.hypot(dx, dy)
+    if dist <= 0.5:
+        ac.current_leg_completed = True
+        ac.current_leg_index += 1
+        return
+    ac.current_leg_completed = False
+    ac.heading_deg = (math.degrees(math.atan2(dx, dy)) + 360) % 360
+    min_alt = wp.get("min_altitude_ft")
+    max_alt = wp.get("max_altitude_ft")
+    if min_alt is not None and ac.altitude_ft < min_alt:
+        ac.target_altitude_ft = min_alt
+        ac.vertical_rate_fpm = 1000
+    elif max_alt is not None and ac.altitude_ft > max_alt:
+        ac.target_altitude_ft = max_alt
+        ac.vertical_rate_fpm = -1000
+    if wp.get("speed_kt") is not None:
+        ac.speed_kt = wp["speed_kt"]
 
 
 def _point_in_polygon(x_nm: float, y_nm: float, vertices: list[dict]) -> bool:
@@ -226,12 +257,18 @@ def apply_actions(world: WorldState, actions: list[dict]) -> dict:
         t = action["type"]
         if t == "assign_heading":
             ac.heading_deg = action["heading"]
+            ac.managed_route_active = False
+            ac.manual_override_until_sec = world.time_sec + 120
         elif t == "assign_altitude":
             target = action["altitude_ft"]
             ac.target_altitude_ft = target
             ac.vertical_rate_fpm = 0 if target == ac.altitude_ft else 1500 if target > ac.altitude_ft else -1500
+            ac.managed_route_active = False
+            ac.manual_override_until_sec = world.time_sec + 120
         elif t == "assign_speed":
             ac.speed_kt = action["speed_kt"]
+            ac.managed_route_active = False
+            ac.manual_override_until_sec = world.time_sec + 120
         elif t == "clear_to_land":
             ac.clearance = "cleared_to_land"
             ac.status = "on_final"
@@ -251,6 +288,11 @@ def apply_actions(world: WorldState, actions: list[dict]) -> dict:
             go_arounds += 1
         elif t in {"hold_short", "hold_position"}:
             ac.speed_kt = 0
+            ac.managed_route_active = False
+            ac.manual_override_until_sec = world.time_sec + 120
+        elif t == "resume_procedure":
+            ac.managed_route_active = True
+            ac.manual_override_until_sec = None
         elif t == "no_op":
             continue
     return {"go_around_count": go_arounds}

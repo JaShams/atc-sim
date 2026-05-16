@@ -1,0 +1,28 @@
+{
+  "tick_sec": 5,
+  "airport": {
+    "runway_id": "27",
+    "active_runway": "27",
+    "departure_queue": ["DAL101"]
+  },
+  "aircraft": [
+    {
+      "callsign": "DAL101",
+      "role": "departure",
+      "x_nm": 0.0,
+      "y_nm": 0.0,
+      "altitude_ft": 0,
+      "speed_kt": 140,
+      "heading_deg": 270,
+      "status": "waiting_departure",
+      "route_id": "SID-TEST1",
+      "procedure_type": "SID",
+      "waypoints": [
+        {"name": "SID1", "x_nm": -3.0, "y_nm": 0.0, "min_altitude_ft": 1500, "speed_kt": 180},
+        {"name": "SID2", "x_nm": -8.0, "y_nm": 2.0, "min_altitude_ft": 4000, "speed_kt": 220}
+      ],
+      "current_leg_index": 0,
+      "current_leg_completed": false
+    }
+  ]
+}
