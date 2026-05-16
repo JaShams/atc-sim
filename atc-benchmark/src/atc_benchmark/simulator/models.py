@@ -73,6 +73,8 @@ class RulesConfig:
     outcome_normalization_floor: float = 1.0
     debug_require_trigger_provenance: bool = False
     restricted_zones: list[dict[str, Any]] = field(default_factory=list)
+    pilot_readback_delay_sec: dict[str, int] = field(default_factory=lambda: {"min": 0, "max": 0})
+    command_delay_seed: int | None = None
 
 
 @dataclass
