@@ -1,6 +1,9 @@
 
+from itertools import combinations
+from math import hypot
+
 from atc_benchmark.paths import resolve_scenario_path
-from atc_benchmark.simulator.conflict_detection import detect_conflicts, predict_conflicts
+from atc_benchmark.simulator.conflict_detection import _candidate_pairs, detect_conflicts, predict_conflicts
 from atc_benchmark.simulator.engine import load_world
 
 
@@ -124,3 +127,30 @@ def test_non_heavy_baseline_minimum_is_unchanged() -> None:
     conflicts = detect_conflicts(world)
     assert conflicts
     assert conflicts[0]["required_horizontal_nm"] == world.rules.min_horizontal_nm
+
+
+def test_spatial_pruning_keeps_small_scenario_conflict_results() -> None:
+    world = load_world(resolve_scenario_path("scenarios/crossing_conflict_001.json"))
+    ac_list = [a for a in world.aircraft.values() if a.status in {"airborne", "on_final", "go_around", "rolling", "airborne_departure"}]
+    baseline_pairs = {(a.callsign, b.callsign) for a, b in combinations(ac_list, 2)}
+    pruned_pairs = {tuple(sorted((a.callsign, b.callsign))) for a, b in _candidate_pairs(ac_list, world.rules.min_horizontal_nm)}
+    assert pruned_pairs.issubset({tuple(sorted(p)) for p in baseline_pairs})
+    assert detect_conflicts(world) == detect_conflicts(world)
+
+
+def test_spatial_pruning_reduces_candidate_pairs_on_sparse_aircraft() -> None:
+    world = load_world(resolve_scenario_path("scenarios/crossing_conflict_001.json"))
+    world.aircraft.clear()
+    n = 80
+    for i in range(n):
+        template = load_world(resolve_scenario_path("scenarios/crossing_conflict_001.json")).aircraft["ARR1"]
+        template.callsign = f"T{i:03d}"
+        template.x_nm = float(i * 20)
+        template.y_nm = float(i * 20)
+        template.status = "airborne"
+        template.altitude_ft = 10000.0 + i
+        world.aircraft[template.callsign] = template
+    ac_list = list(world.aircraft.values())
+    baseline_count = (n * (n - 1)) // 2
+    pruned_count = sum(1 for _ in _candidate_pairs(ac_list, world.rules.min_horizontal_nm))
+    assert pruned_count < baseline_count
