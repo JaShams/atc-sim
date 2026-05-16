@@ -11,14 +11,60 @@
     <header class="app-header">
       <div>
         <p class="eyebrow">ATC Benchmark</p>
-        <h1>Replay Viewer</h1>
+        <h1>Live + Replay Viewer</h1>
       </div>
       <div id="loadStatus" class="status-pill" role="status">Load a trace file to begin. Score file optional.</div>
     </header>
 
+    <section class="panel controls" aria-label="Viewer mode">
+      <label for="modeSelect">Mode</label>
+      <select id="modeSelect">
+        <option value="replay">Replay mode</option>
+        <option value="live">Live mode</option>
+      </select>
+      <span id="modeStatus" class="muted">Replay mode loads files from disk.</span>
+    </section>
+
     <section class="panel controls" aria-label="Load replay files">
       <label class="file-picker">Trace JSONL <input id="traceFile" type="file" accept=".jsonl,.txt,application/json" /></label>
       <label class="file-picker">Score JSON <input id="scoreFile" type="file" accept=".json,application/json" /></label>
+    </section>
+
+    <section class="panel" id="livePanel" aria-label="Live controller panel" hidden>
+      <div class="section-heading">
+        <div><p class="eyebrow">Control</p><h2>Live Commands</h2></div>
+      </div>
+      <div class="grid">
+        <article class="panel">
+          <label for="liveEndpoint">Transport endpoint</label>
+          <input id="liveEndpoint" type="text" value="ws://localhost:8080/live" />
+          <div class="timeline-row">
+            <button id="liveConnect" type="button">Connect</button>
+            <button id="liveDisconnect" type="button" disabled>Disconnect</button>
+          </div>
+        </article>
+        <article class="panel">
+          <label for="commandAircraft">Aircraft</label>
+          <select id="commandAircraft"></select>
+          <label for="commandType">Command</label>
+          <select id="commandType">
+            <option value="no_op">No action</option>
+            <option value="assign_heading">Assign heading</option>
+            <option value="assign_altitude">Assign altitude</option>
+            <option value="assign_speed">Assign speed</option>
+            <option value="clear_to_land">Clear to land</option>
+            <option value="clear_for_takeoff">Clear for takeoff</option>
+            <option value="go_around">Go around</option>
+            <option value="hold_short">Hold short</option>
+            <option value="hold_position">Hold position</option>
+          </select>
+          <div class="timeline-row">
+            <label for="commandValue">Value</label>
+            <input id="commandValue" type="number" step="1" />
+            <button id="sendCommand" type="button" disabled>Send command</button>
+          </div>
+        </article>
+      </div>
     </section>
 
     <section class="summary-band" id="scenarioSummary" aria-label="Scenario summary">
