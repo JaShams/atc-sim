@@ -41,6 +41,16 @@ class Aircraft:
     landing_time_sec: int | None = None
     ideal_takeoff_time_sec: int | None = None
     ideal_landing_time_sec: int | None = None
+    emergency_subtype: str | None = None
+    emergency_deadline_sec: int | None = None
+    emergency_remaining_endurance_sec: int | None = None
+    emergency_terminal_failure: bool = False
+    emergency_require_return_to_land: bool = False
+    max_climb_fpm: float | None = None
+    max_descent_fpm: float | None = None
+    max_speed_kt: float | None = None
+    min_speed_kt: float | None = None
+    max_turn_rate_deg_per_sec: float | None = None
     route_id: str | None = None
     procedure_type: str | None = None
     waypoints: list[dict[str, Any]] = field(default_factory=list)

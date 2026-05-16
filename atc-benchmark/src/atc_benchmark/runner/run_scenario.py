@@ -69,7 +69,15 @@ def agent_config(agent_name: str, *, human_timeout_sec: float, human_max_retries
     return config
 
 
-def build_manifest(scenario: Path, world, agent_name: str, max_ticks: int, *, human_timeout_sec: float, human_max_retries: int) -> dict:
+def build_manifest(
+    scenario: Path,
+    world,
+    agent_name: str,
+    max_ticks: int,
+    *,
+    human_timeout_sec: float = 30.0,
+    human_max_retries: int = 3,
+) -> dict:
     scenario_doc = json.loads(scenario.read_text())
     manifest = {
         "scenario_file": scenario.name,

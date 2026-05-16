@@ -1,0 +1,25 @@
+{
+  "tick_sec": 5,
+  "airport": {"runway_id": "27", "active_runway": "27", "departure_queue": ["DEP3"]},
+  "events": [
+    {"time_sec": 0, "type": "engine_failure", "aircraft": "ARR_ENG", "max_climb_fpm": 400, "max_speed_kt": 200, "max_turn_rate_deg_per_sec": 1.5, "require_return_to_land": true}
+  ],
+  "aircraft": [
+    {"callsign": "ARR_ENG", "role": "arrival", "x_nm": -5, "y_nm": 0, "altitude_ft": 1500, "speed_kt": 170, "heading_deg": 90, "status": "on_final", "target_runway": "27"},
+    {"callsign": "ARR3", "role": "arrival", "x_nm": -9, "y_nm": 1.2, "altitude_ft": 2700, "speed_kt": 185, "heading_deg": 90, "status": "airborne", "target_runway": "27"},
+    {"callsign": "DEP3", "role": "departure", "x_nm": 0, "y_nm": 0, "altitude_ft": 0, "speed_kt": 0, "heading_deg": 270, "status": "waiting_departure", "target_runway": "27"}
+  ],
+  "scenario_metadata": {
+    "tags": ["safety", "event"],
+    "difficulty_tier": "advanced",
+    "intended_stressors": [
+      "engine failure performance limits",
+      "emergency return priority"
+    ],
+    "expected_baseline_ranges": {
+      "score": [0, 120],
+      "emergency_handled_count": [0, 1],
+      "emergency_unhandled_count": [0, 1]
+    }
+  }
+}

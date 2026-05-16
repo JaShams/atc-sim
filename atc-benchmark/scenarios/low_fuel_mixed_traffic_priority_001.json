@@ -1,0 +1,26 @@
+{
+  "tick_sec": 5,
+  "airport": {"runway_id": "18", "active_runway": "18", "departure_queue": ["DEP1", "DEP2"]},
+  "events": [
+    {"time_sec": 5, "type": "low_fuel_emergency", "aircraft": "ARR_LOW", "remaining_endurance_sec": 90}
+  ],
+  "aircraft": [
+    {"callsign": "ARR_LOW", "role": "arrival", "x_nm": -6, "y_nm": 0.5, "altitude_ft": 1800, "speed_kt": 165, "heading_deg": 90, "status": "airborne", "target_runway": "18"},
+    {"callsign": "ARR2", "role": "arrival", "x_nm": -10, "y_nm": -1.2, "altitude_ft": 2600, "speed_kt": 180, "heading_deg": 90, "status": "airborne", "target_runway": "18"},
+    {"callsign": "DEP1", "role": "departure", "x_nm": 0, "y_nm": 0, "altitude_ft": 0, "speed_kt": 0, "heading_deg": 180, "status": "waiting_departure", "target_runway": "18"},
+    {"callsign": "DEP2", "role": "departure", "x_nm": 0, "y_nm": 0, "altitude_ft": 0, "speed_kt": 0, "heading_deg": 180, "status": "waiting_departure", "target_runway": "18"}
+  ],
+  "scenario_metadata": {
+    "tags": ["safety", "event"],
+    "difficulty_tier": "expert",
+    "intended_stressors": [
+      "low fuel emergency priority",
+      "mixed arrival departure traffic"
+    ],
+    "expected_baseline_ranges": {
+      "score": [0, 120],
+      "emergency_handled_count": [0, 1],
+      "emergency_unhandled_count": [0, 1]
+    }
+  }
+}

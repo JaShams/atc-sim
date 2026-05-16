@@ -24,5 +24,18 @@
       "current_leg_index": 0,
       "current_leg_completed": false
     }
-  ]
+  ],
+  "scenario_metadata": {
+    "tags": ["efficiency"],
+    "difficulty_tier": "intro",
+    "intended_stressors": [
+      "STAR altitude constraints",
+      "managed route tracking"
+    ],
+    "expected_baseline_ranges": {
+      "score": [0, 120],
+      "throughput_ops_per_hour": [0, 720],
+      "invalid_commands": [0, 20]
+    }
+  }
 }
