@@ -269,6 +269,7 @@ function setLiveConnectionState(connected) {
 
 function handleLiveEnvelope(payload) {
   if (!payload) return;
+  if (payload.session_id) liveSessionId = payload.session_id;
   if (payload.type === 'level_complete') {
     persistLiveRun(payload);
     return;

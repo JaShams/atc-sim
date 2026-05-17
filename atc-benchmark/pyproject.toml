@@ -15,6 +15,9 @@ dev = [
     "pytest>=7.4",
     "ruff>=0.3",
 ]
+live = [
+    "uvicorn[standard]>=0.23",
+]
 
 [project.scripts]
 atc-run = "atc_benchmark.runner.run_scenario:main"
@@ -22,6 +25,7 @@ atc-batch = "atc_benchmark.runner.batch_evaluate:main"
 atc-validate = "atc_benchmark.runner.validate_scenarios:main"
 atc-motif = "atc_benchmark.runner.analyze_motifs:main"
 atc-ingest = "atc_benchmark.runner.ingest_scenario:main"
+atc-live = "atc_benchmark.runner.live_server:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
