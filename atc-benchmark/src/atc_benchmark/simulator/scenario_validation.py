@@ -104,6 +104,11 @@ def _validate_airport(airport: Any, errors: list[str]) -> None:
             errors.append("airport.departure_queue must be a list of callsign strings")
     if airport.get("runway_occupied_until_sec") is not None and not _is_non_negative_number(airport.get("runway_occupied_until_sec")):
         errors.append("airport.runway_occupied_until_sec must be null or non-negative")
+    for field in ("reference_point", "display_center"):
+        if field in airport:
+            _validate_point(airport[field], f"airport.{field}", errors)
+    if airport.get("default_range_nm") is not None and not _is_non_negative_number(airport.get("default_range_nm")):
+        errors.append("airport.default_range_nm must be null or non-negative")
     if "layout" in airport:
         _validate_airport_layout(airport["layout"], errors)
 

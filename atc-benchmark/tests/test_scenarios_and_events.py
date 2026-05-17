@@ -119,13 +119,20 @@ def test_airport_layout_survives_load_snapshot_and_trace(tmp_path):
         "stands": [{"id": "S1", "position": {"x_nm": -0.4, "y_nm": -0.7}}],
     }
     source["airport"]["layout"] = layout
+    source["airport"]["reference_point"] = {"x_nm": 0.0, "y_nm": 0.0}
+    source["airport"]["display_center"] = {"x_nm": 1.0, "y_nm": 2.0}
+    source["airport"]["default_range_nm"] = 40
     scenario = tmp_path / "layout_scenario.json"
     trace = tmp_path / "layout_trace.jsonl"
     scenario.write_text(json.dumps(source))
 
     world = load_world(scenario)
     assert world.snapshot()["airport"]["layout"] == layout
+    assert world.snapshot()["airport"]["reference_point"] == {"x_nm": 0.0, "y_nm": 0.0}
+    assert world.snapshot()["airport"]["display_center"] == {"x_nm": 1.0, "y_nm": 2.0}
+    assert world.snapshot()["airport"]["default_range_nm"] == 40
 
     run(world, NoOpAgent(), max_ticks=1, trace_path=trace)
     first_tick = json.loads(trace.read_text().splitlines()[0])
     assert first_tick["state"]["airport"]["layout"] == layout
+    assert first_tick["state"]["airport"]["display_center"] == {"x_nm": 1.0, "y_nm": 2.0}

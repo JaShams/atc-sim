@@ -78,6 +78,9 @@ class AirportState:
     runway_occupied_until_sec: int | None = None
     departure_queue: list[str] = field(default_factory=list)
     layout: dict[str, Any] | None = None
+    reference_point: dict[str, float] | None = None
+    display_center: dict[str, float] | None = None
+    default_range_nm: float | None = None
 
 
 @dataclass
@@ -148,6 +151,12 @@ class WorldState:
         }
         if self.airport.layout is not None:
             airport["layout"] = self.airport.layout
+        if self.airport.reference_point is not None:
+            airport["reference_point"] = dict(self.airport.reference_point)
+        if self.airport.display_center is not None:
+            airport["display_center"] = dict(self.airport.display_center)
+        if self.airport.default_range_nm is not None:
+            airport["default_range_nm"] = self.airport.default_range_nm
         return {
             "time_sec": self.time_sec,
             "airport": airport,
