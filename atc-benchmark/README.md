@@ -26,6 +26,15 @@ atc-batch --agents heuristic,noop,random
 pytest
 ```
 
+## Live Mode
+
+```bash
+pip install -e ".[dev,live]"
+atc-live scenarios/crossing_conflict_001.json --host 127.0.0.1 --port 8080
+```
+
+Then open `../viewer/index.html`, switch to `Live mode`, and connect to `ws://localhost:8080/live`.
+
 ## Action schema (required fields)
 
 Each action must include:

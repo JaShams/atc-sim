@@ -52,6 +52,23 @@ atc-batch --agents heuristic,noop,random
 
 Open `viewer/index.html` in a browser, load a trace JSONL file, and optionally load the matching score JSON. The viewer supports scrubbing, playback, conflict links, stable radar bounds, and manifest display.
 
+## Live Mode
+
+Install the live server extra:
+
+```bash
+cd atc-benchmark
+pip install -e ".[dev,live]"
+```
+
+Start a live scenario server:
+
+```bash
+atc-live scenarios/crossing_conflict_001.json --host 127.0.0.1 --port 8080
+```
+
+Open `viewer/index.html`, switch the mode dropdown to `Live mode`, keep the endpoint as `ws://localhost:8080/live`, and click `Connect`. The viewer streams simulator ticks and sends live commands back over the same websocket.
+
 ## Local Checks
 
 ```bash
