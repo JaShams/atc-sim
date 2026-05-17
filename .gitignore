@@ -1,4 +1,7 @@
 .venv
+node_modules
+playwright-report
+test-results
 outputs
 atc-benchmark/outputs
 atc-benchmark/src/atc_benchmark.egg-info

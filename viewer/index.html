@@ -30,17 +30,20 @@
       <label class="file-picker">Score JSON <input id="scoreFile" type="file" accept=".json,application/json" /></label>
     </section>
 
-    <section class="panel" id="livePanel" aria-label="Live controller panel" hidden>
+    <section class="panel live-control-panel" id="livePanel" aria-label="Live controller panel" hidden>
       <div class="section-heading">
-        <div><p class="eyebrow">Control</p><h2>Live Commands</h2></div>
+        <div><p class="eyebrow">Live Game</p><h2>Session Control</h2></div>
       </div>
       <div class="grid">
         <article class="panel">
           <label for="liveEndpoint">Transport endpoint</label>
           <input id="liveEndpoint" type="text" value="ws://localhost:8080/live" />
           <div class="timeline-row">
-            <button id="liveConnect" type="button">Connect</button>
+            <button id="liveConnect" type="button">Start</button>
             <button id="liveDisconnect" type="button" disabled>Disconnect</button>
+            <button id="livePause" type="button" disabled>Pause</button>
+            <button id="liveReset" type="button" disabled>Reset Scenario</button>
+            <button id="liveEnd" type="button" disabled>End Session</button>
           </div>
         </article>
         <article class="panel">
@@ -67,6 +70,35 @@
           <p id="commandFeedback" class="command-feedback" role="status" aria-live="polite"></p>
         </article>
       </div>
+    </section>
+
+    <section class="live-game-layout" id="liveGamePanel" aria-label="Live game dashboard" hidden>
+      <article class="panel live-status-card">
+        <div class="section-heading">
+          <div><p class="eyebrow">Objective</p><h2 id="liveObjectiveTitle">Start a live session</h2></div>
+          <span id="liveRunState" class="status-pill">Disconnected</span>
+        </div>
+        <p id="liveObjectiveCopy" class="summary-copy">Start live mode to control traffic in real time.</p>
+        <div id="liveStats" class="live-stat-grid"></div>
+      </article>
+      <article class="panel live-alert-card">
+        <div class="section-heading">
+          <div><p class="eyebrow">Alerts</p><h2>Controller Queue</h2></div>
+        </div>
+        <div id="liveAlerts" class="live-alert-list"></div>
+      </article>
+      <article class="panel live-strip-card">
+        <div class="section-heading">
+          <div><p class="eyebrow">Aircraft</p><h2>Flight Strips</h2></div>
+        </div>
+        <div id="liveStrips" class="flight-strip-list"></div>
+      </article>
+      <article class="panel live-log-card">
+        <div class="section-heading">
+          <div><p class="eyebrow">Log</p><h2>Recent Events</h2></div>
+        </div>
+        <div id="liveEventLog" class="live-event-log"></div>
+      </article>
     </section>
 
     <section class="summary-band" id="scenarioSummary" aria-label="Scenario summary">
@@ -101,7 +133,7 @@
             <input id="togglePrediction" type="checkbox" checked /> Show prediction overlay
           </label>
         </div>
-        <div class="timeline-row" aria-label="Replay controls">
+        <div class="timeline-row replay-controls" aria-label="Replay controls">
           <button id="stepBack" class="icon-button" type="button" disabled aria-label="Previous tick" title="Previous tick">&#9664;</button>
           <button id="playPause" type="button" disabled aria-label="Play replay" title="Play replay">Play</button>
           <button id="stepForward" class="icon-button" type="button" disabled aria-label="Next tick" title="Next tick">&#9654;</button>

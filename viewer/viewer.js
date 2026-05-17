@@ -29,6 +29,17 @@ const livePanel = document.getElementById('livePanel');
 const liveEndpointInput = document.getElementById('liveEndpoint');
 const liveConnect = document.getElementById('liveConnect');
 const liveDisconnect = document.getElementById('liveDisconnect');
+const livePause = document.getElementById('livePause');
+const liveReset = document.getElementById('liveReset');
+const liveEnd = document.getElementById('liveEnd');
+const liveGamePanel = document.getElementById('liveGamePanel');
+const liveObjectiveTitle = document.getElementById('liveObjectiveTitle');
+const liveObjectiveCopy = document.getElementById('liveObjectiveCopy');
+const liveRunState = document.getElementById('liveRunState');
+const liveStats = document.getElementById('liveStats');
+const liveAlerts = document.getElementById('liveAlerts');
+const liveStrips = document.getElementById('liveStrips');
+const liveEventLog = document.getElementById('liveEventLog');
 const commandAircraft = document.getElementById('commandAircraft');
 const commandType = document.getElementById('commandType');
 const commandValue = document.getElementById('commandValue');
@@ -55,6 +66,9 @@ let liveSessionId = null;
 let liveFrameHandle = null;
 let liveSnapshotsByCallsign = new Map();
 let latestLiveArrivalMs = 0;
+let liveFollowTail = true;
+let livePaused = false;
+let liveLogEntries = [];
 
 const LIVE_INTERPOLATION = {
   lagMs: 220,
@@ -108,7 +122,10 @@ const labelMap = {
 
 traceFileInput.addEventListener('change', loadFiles);
 scoreFileInput.addEventListener('change', loadFiles);
-slider.addEventListener('input', () => renderAtTick(Number(slider.value)));
+slider.addEventListener('input', () => {
+  if (currentMode === 'live') liveFollowTail = false;
+  renderAtTick(Number(slider.value));
+});
 slider.addEventListener('keydown', (event) => {
   if (event.key === 'ArrowLeft') {
     event.preventDefault();
@@ -129,7 +146,7 @@ playSpeed.addEventListener('change', () => {
 });
 zoomIn.addEventListener('click', () => zoomRadar(1.35));
 zoomOut.addEventListener('click', () => zoomRadar(1 / 1.35));
-resetView.addEventListener('click', resetRadarView);
+resetView.addEventListener('click', resetTimelineOrView);
 filterHurt.addEventListener('change', renderTimeline);
 filterSafety.addEventListener('change', renderTimeline);
 filterLargeDelta.addEventListener('change', renderTimeline);
@@ -147,6 +164,9 @@ togglePrediction.addEventListener('change', () => {
 modeSelect.addEventListener('change', handleModeChange);
 liveConnect.addEventListener('click', connectLiveTransport);
 liveDisconnect.addEventListener('click', disconnectLiveTransport);
+livePause.addEventListener('click', () => sendLiveControl(livePaused ? 'resume' : 'pause'));
+liveReset.addEventListener('click', () => sendLiveControl('reset'));
+liveEnd.addEventListener('click', () => sendLiveControl('end_session'));
 sendCommand.addEventListener('click', sendLiveCommand);
 commandType.addEventListener('change', syncCommandFormForType);
 commandValue.addEventListener('input', () => setCommandFeedback(null, ''));
@@ -220,22 +240,32 @@ async function loadFiles() {
 function handleModeChange() {
   currentMode = modeSelect.value;
   const isLive = currentMode === 'live';
+  document.body.classList.toggle('live-mode', isLive);
   livePanel.hidden = !isLive;
+  liveGamePanel.hidden = !isLive;
   traceFileInput.closest('section').hidden = isLive;
   modeStatus.textContent = isLive
     ? 'Live mode connects to a backend adapter and streams tick snapshots.'
     : 'Replay mode loads files from disk.';
   if (!isLive) disconnectLiveTransport();
+  syncPlaybackButton();
 }
 
 function connectLiveTransport() {
   const endpoint = (liveEndpointInput.value || '').trim();
   if (!endpoint) return;
   disconnectLiveTransport();
+  resetLiveRunState();
   if (endpoint.startsWith('ws://') || endpoint.startsWith('wss://')) {
     liveSocket = new WebSocket(endpoint);
     liveSocket.onopen = () => {
       setLiveConnectionState(true);
+      liveFollowTail = true;
+      livePaused = false;
+      syncPlaybackButton();
+      syncLiveControlButtons();
+      updateLiveRunState('Running');
+      appendLiveLog('Session started.');
       loadStatus.textContent = `Live connected: ${endpoint}`;
       liveSocket.send(JSON.stringify({ type: 'subscribe_tick_stream' }));
     };
@@ -258,18 +288,80 @@ function disconnectLiveTransport() {
   liveSocket = null;
   if (livePollTimer) clearInterval(livePollTimer);
   livePollTimer = null;
+  liveFollowTail = false;
+  livePaused = false;
+  stopPlayback();
   setLiveConnectionState(false);
+  updateLiveRunState('Disconnected');
 }
 
 function setLiveConnectionState(connected) {
   liveConnect.disabled = connected;
   liveDisconnect.disabled = !connected;
   sendCommand.disabled = !connected;
+  livePause.disabled = !connected;
+  liveReset.disabled = !connected;
+  liveEnd.disabled = !connected;
+  syncLiveControlButtons();
+}
+
+function syncLiveControlButtons() {
+  livePause.textContent = livePaused ? 'Resume' : 'Pause';
+  livePause.setAttribute('aria-label', livePaused ? 'Resume simulation' : 'Pause simulation');
+}
+
+function resetLiveRunState() {
+  stopPlayback();
+  resetLiveSessionView();
+  liveSessionId = null;
+  livePaused = false;
+  liveLogEntries = [];
+  slider.disabled = true;
+  playPause.disabled = true;
+  stepBack.disabled = true;
+  stepForward.disabled = true;
+  zoomIn.disabled = true;
+  zoomOut.disabled = true;
+  resetView.disabled = true;
+  clearNode(commandAircraft);
+  renderLiveDashboard(null);
+  syncLiveControlButtons();
+}
+
+function resetLiveSessionView() {
+  traceEvents = [];
+  score = null;
+  radarBounds = null;
+  radarView = null;
+  currentTickIndex = 0;
+  selectedCallsign = null;
+  hoveredCallsign = null;
+  liveSnapshotsByCallsign.clear();
+  latestLiveArrivalMs = 0;
+  liveFollowTail = true;
+  slider.min = 0;
+  slider.max = 0;
+  slider.value = 0;
+  tickLabel.textContent = '0 / 0';
+  renderTimeline();
+  renderScore();
+  renderAircraftPanel(null, null);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
 
 function handleLiveEnvelope(payload) {
   if (!payload) return;
   if (payload.session_id) liveSessionId = payload.session_id;
+  if (payload.type === 'control_ack' || payload.type === 'control_status') {
+    handleLiveControlStatus(payload);
+    return;
+  }
+  if (payload.type === 'command_ack') {
+    appendLiveLog(describeCommandAck(payload));
+    const reason = extractCommandRejectionReason(payload);
+    setCommandFeedback(payload.ok ? 'accepted' : 'rejected', payload.ok ? 'Accepted: command applied.' : `Rejected: ${reason || 'command rejected'}.`);
+    return;
+  }
   if (payload.type === 'level_complete') {
     persistLiveRun(payload);
     return;
@@ -288,9 +380,197 @@ function handleLiveEnvelope(payload) {
   radarBounds = calculateBounds(traceEvents);
   if (!radarView) resetRadarView(false);
   slider.max = Math.max(0, traceEvents.length - 1);
-  renderAtTick(traceEvents.length - 1);
+  if (currentMode !== 'live' || liveFollowTail) {
+    renderAtTick(traceEvents.length - 1);
+  }
   renderTimeline();
   populateAircraftSelector(event);
+  renderLiveDashboard(event);
+}
+
+function handleLiveControlStatus(payload) {
+  const status = payload.status || 'running';
+  if (status === 'paused') livePaused = true;
+  if (status === 'running' || status === 'reset') livePaused = false;
+  if (status === 'ended') {
+    livePaused = true;
+    setLiveConnectionState(false);
+  }
+  syncLiveControlButtons();
+  updateLiveRunState(humanize(status));
+  appendLiveLog(`Simulation ${humanize(status)}.`);
+  if (status === 'reset') {
+    liveFollowTail = true;
+  }
+}
+
+function sendLiveControl(type) {
+  if (!liveSocket || liveSocket.readyState !== WebSocket.OPEN) {
+    setCommandFeedback('rejected', 'Rejected: live transport is not connected.');
+    return;
+  }
+  liveSocket.send(JSON.stringify({ type, session_id: liveSessionId }));
+  if (type === 'pause') {
+    livePaused = true;
+    updateLiveRunState('Paused');
+    appendLiveLog('Pause requested.');
+  } else if (type === 'resume') {
+    livePaused = false;
+    liveFollowTail = true;
+    updateLiveRunState('Running');
+    appendLiveLog('Resume requested.');
+  } else if (type === 'reset') {
+    resetLiveSessionView();
+    updateLiveRunState('Resetting');
+    appendLiveLog('Scenario reset requested.');
+  } else if (type === 'end_session') {
+    updateLiveRunState('Ending');
+    appendLiveLog('End session requested.');
+  }
+  syncLiveControlButtons();
+}
+
+function updateLiveRunState(label) {
+  liveRunState.textContent = label;
+}
+
+function renderLiveDashboard(event) {
+  clearNode(liveStats);
+  clearNode(liveAlerts);
+  clearNode(liveStrips);
+  renderLiveLog();
+
+  if (!event?.state) {
+    liveObjectiveTitle.textContent = 'Start a live session';
+    liveObjectiveCopy.textContent = 'Start live mode to control traffic in real time.';
+    [
+      ['Clock', '0s', 'Current simulation clock.'],
+      ['Aircraft', '0', 'Tracked aircraft in the live session.'],
+      ['Conflicts', '0', 'Active aircraft separation conflicts.'],
+      ['Runway', '-', 'Current runway state.']
+    ].forEach(([label, value, help]) => liveStats.appendChild(renderStat(label, value, help)));
+    appendText(liveAlerts, 'p', 'No live traffic yet.').className = 'muted';
+    appendText(liveStrips, 'p', 'Flight strips appear after the first tick.').className = 'muted';
+    return;
+  }
+
+  const state = event.state;
+  const aircraft = Object.values(state.aircraft || {});
+  const conflicts = event.conflicts || [];
+  const predicted = event.predicted_conflicts || [];
+  const airport = state.airport || {};
+  const runway = airport.active_runway || airport.runway_id || 'unknown';
+  const completed = aircraft.filter((ac) => ac.status === 'landed' || ac.status === 'exited_airspace').length;
+  const emergencies = aircraft.filter((ac) => ac.emergency).length;
+  const runwayStatus = airport.runway_occupied_by
+    ? `${runway} occupied by ${airport.runway_occupied_by}`
+    : `${runway} clear`;
+
+  liveObjectiveTitle.textContent = `${runway} control`;
+  liveObjectiveCopy.textContent = buildLiveObjectiveCopy(aircraft, runway, emergencies);
+  [
+    ['Clock', `${event.time}s`, 'Current simulation clock.'],
+    ['Aircraft', String(aircraft.length), 'Tracked aircraft in the live session.'],
+    ['Completed', String(completed), 'Aircraft landed or exited airspace.'],
+    ['Conflicts', String(conflicts.length), 'Active aircraft separation conflicts.'],
+    ['Predicted', String(predicted.length), 'Projected conflicts in the lookahead window.'],
+    ['Runway', runwayStatus, 'Current runway state.']
+  ].forEach(([label, value, help]) => liveStats.appendChild(renderStat(label, value, help)));
+
+  renderLiveAlerts(event, emergencies);
+  renderFlightStrips(event, aircraft);
+}
+
+function buildLiveObjectiveCopy(aircraft, runway, emergencies) {
+  const arrivals = aircraft.filter((ac) => ac.role === 'arrival').length;
+  const departures = aircraft.filter((ac) => ac.role === 'departure').length;
+  const parts = [`Sequence ${countPhrase(arrivals, 'arrival')} and ${countPhrase(departures, 'departure')} around runway ${runway}.`];
+  if (emergencies) parts.push(`Prioritize ${countPhrase(emergencies, 'emergency aircraft')}.`);
+  parts.push('Keep separation, protect the runway, and issue clearances from the aircraft strips or command panel.');
+  return parts.join(' ');
+}
+
+function renderLiveAlerts(event, emergencies) {
+  const alerts = [];
+  (event.conflicts || []).forEach((conflict) => alerts.push({ level: 'critical', text: `Active conflict: ${(conflict.aircraft || []).join(', ')}` }));
+  (event.predicted_conflicts || []).forEach((conflict) => alerts.push({ level: 'warn', text: `Predicted conflict: ${(conflict.aircraft || []).join(', ')}` }));
+  (event.decision_points || []).forEach((point) => alerts.push({ level: point.severity || 'info', text: describeDecisionPoint(point) }));
+  if (emergencies) alerts.push({ level: 'critical', text: `${countPhrase(emergencies, 'emergency aircraft')} require priority.` });
+  if (!alerts.length) {
+    appendText(liveAlerts, 'p', 'No active controller alerts.').className = 'muted';
+    return;
+  }
+  alerts.slice(0, 8).forEach((alert) => {
+    const node = document.createElement('div');
+    node.className = `live-alert live-alert-${String(alert.level).toLowerCase()}`;
+    node.textContent = alert.text;
+    liveAlerts.appendChild(node);
+  });
+}
+
+function renderFlightStrips(event, aircraft) {
+  const conflictSet = aircraftSetFromRecords(event.conflicts || []);
+  const predictedSet = aircraftSetFromRecords(event.predicted_conflicts || []);
+  if (!aircraft.length) {
+    appendText(liveStrips, 'p', 'No aircraft in this live session.').className = 'muted';
+    return;
+  }
+  aircraft.forEach((ac) => {
+    const strip = document.createElement('button');
+    strip.type = 'button';
+    strip.className = 'flight-strip';
+    if (selectedCallsign === ac.callsign) strip.classList.add('selected');
+    if (conflictSet.has(ac.callsign)) strip.classList.add('critical');
+    else if (predictedSet.has(ac.callsign) || ac.emergency) strip.classList.add('warn');
+    strip.addEventListener('click', () => {
+      selectedCallsign = ac.callsign;
+      commandAircraft.value = ac.callsign;
+      drawCurrentRadar();
+      renderAircraftPanel(traceEvents[currentTickIndex], selectedCallsign);
+    });
+
+    const title = document.createElement('span');
+    title.className = 'strip-title';
+    appendText(title, 'b', ac.callsign);
+    appendText(title, 'span', humanize(ac.role || 'aircraft'));
+    const state = document.createElement('span');
+    state.className = 'strip-state';
+    state.textContent = `${Math.round(ac.altitude_ft)} ft | ${Math.round(ac.speed_kt)} kt | HDG ${Math.round(ac.heading_deg)}`;
+    const clearance = document.createElement('span');
+    clearance.className = 'strip-clearance';
+    clearance.textContent = ac.clearance ? humanize(ac.clearance) : humanize(ac.status || 'airborne');
+    strip.append(title, state, clearance);
+    liveStrips.appendChild(strip);
+  });
+}
+
+function appendLiveLog(message) {
+  if (!message) return;
+  liveLogEntries.unshift({ time: new Date().toLocaleTimeString(), message });
+  liveLogEntries = liveLogEntries.slice(0, 12);
+  renderLiveLog();
+}
+
+function renderLiveLog() {
+  clearNode(liveEventLog);
+  if (!liveLogEntries.length) {
+    appendText(liveEventLog, 'p', 'No live events yet.').className = 'muted';
+    return;
+  }
+  liveLogEntries.forEach((entry) => {
+    const row = document.createElement('div');
+    row.className = 'live-log-row';
+    appendText(row, 'span', entry.time);
+    appendText(row, 'b', entry.message);
+    liveEventLog.appendChild(row);
+  });
+}
+
+function describeCommandAck(payload) {
+  const action = payload.details?.accepted_action || payload.details?.rejected_action;
+  const actionText = action ? describeAction(action) : 'Command';
+  if (payload.ok) return `Accepted: ${actionText}.`;
+  return `Rejected: ${actionText} (${humanize(payload.reason || 'invalid command')}).`;
 }
 
 function ingestLiveSnapshots(event) {
@@ -347,7 +627,7 @@ function sendLiveCommand() {
   setCommandFeedback(null, 'Sending command…');
   if (liveSocket && liveSocket.readyState === WebSocket.OPEN) {
     liveSocket.send(JSON.stringify(envelope));
-    setCommandFeedback('accepted', 'Accepted: command dispatched over WebSocket.');
+    setCommandFeedback(null, 'Command sent. Waiting for controller response.');
     return;
   }
   const endpoint = (liveEndpointInput.value || '').trim().replace(/\/$/, '');
@@ -1432,27 +1712,61 @@ function scoreImpactLabel(totalDelta, immediateDelta) {
 }
 
 function stepTick(delta) {
+  if (currentMode === 'live') {
+    liveFollowTail = false;
+    if (delta > 0) {
+      renderAtTick(traceEvents.length - 1);
+      syncPlaybackButton();
+      return;
+    }
+  }
   const next = Math.max(0, Math.min(traceEvents.length - 1, Number(slider.value) + delta));
   renderAtTick(next);
   if (next === traceEvents.length - 1) stopPlayback();
+  else syncPlaybackButton();
 }
 
 function togglePlayback() {
+  if (currentMode === 'live') {
+    liveFollowTail = !liveFollowTail;
+    if (liveFollowTail && traceEvents.length) renderAtTick(traceEvents.length - 1);
+    syncPlaybackButton();
+    loadStatus.textContent = liveFollowTail
+      ? 'Live playback resumed at the newest tick.'
+      : 'Live playback paused. Incoming ticks are buffered.';
+    return;
+  }
   if (playTimer) stopPlayback();
   else startPlayback();
 }
 
+function resetTimelineOrView() {
+  resetRadarView(false);
+  if (currentMode === 'live' && traceEvents.length) {
+    liveFollowTail = false;
+    renderAtTick(0);
+    syncPlaybackButton();
+    loadStatus.textContent = 'Live replay reset to the first buffered tick.';
+    return;
+  }
+  drawCurrentRadar();
+}
+
 function startPlayback() {
-  playPause.textContent = 'Pause';
-  playPause.setAttribute('aria-label', 'Pause replay');
+  syncPlaybackButton(true);
   playTimer = setInterval(() => stepTick(1), Number(playSpeed.value));
 }
 
 function stopPlayback() {
   if (playTimer) clearInterval(playTimer);
   playTimer = null;
-  playPause.textContent = 'Play';
-  playPause.setAttribute('aria-label', 'Play replay');
+  syncPlaybackButton(false);
+}
+
+function syncPlaybackButton(forcePlaying = null) {
+  const isPlaying = forcePlaying ?? (currentMode === 'live' ? liveFollowTail : Boolean(playTimer));
+  playPause.textContent = isPlaying ? 'Pause' : 'Play';
+  playPause.setAttribute('aria-label', isPlaying ? 'Pause replay' : 'Play replay');
 }
 
 function appendSectionTitle(parent, eyebrow, title) {

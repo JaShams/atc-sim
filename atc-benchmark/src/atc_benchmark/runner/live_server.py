@@ -57,7 +57,7 @@ def _level_complete(world: WorldState) -> bool:
 
 async def _run_simulation(
     *,
-    world: WorldState,
+    runtime: dict[str, Any],
     live_server: LiveTransportServer,
     lock: asyncio.Lock,
     session_id: str,
@@ -65,12 +65,26 @@ async def _run_simulation(
     tick_interval_sec: float,
     manifest: dict[str, Any],
 ) -> None:
-    for tick_id in range(max_ticks):
+    while runtime["tick_id"] < max_ticks:
+        if runtime.get("ended"):
+            await live_server.publish_envelope({"type": "level_complete", "session_id": session_id, "score": None})
+            return
+        if runtime.get("paused"):
+            await asyncio.sleep(0.05)
+            continue
+
         async with lock:
+            world = runtime["world"]
+            tick_id = runtime["tick_id"]
             triggered_events = apply_events(world)
             event = _tick_event(world, tick_id, session_id=session_id, triggered_events=triggered_events)
+            event["actions"] = runtime["pending_actions"]
+            event["invalid_actions"] = runtime["pending_invalid_actions"]
+            runtime["pending_actions"] = []
+            runtime["pending_invalid_actions"] = []
             complete = _level_complete(world)
             _advance_world(world)
+            runtime["tick_id"] += 1
 
         await live_server.publish_envelope({"type": "tick", "session_id": session_id, "tick": event})
         if complete:
@@ -107,18 +121,69 @@ async def serve_live(
     manifest = build_manifest(scenario, world, "live", max_ticks)
     lock = asyncio.Lock()
     live_server = LiveTransportServer()
+    runtime: dict[str, Any] = {
+        "world": world,
+        "tick_id": 0,
+        "paused": False,
+        "ended": False,
+        "pending_actions": [],
+        "pending_invalid_actions": [],
+    }
+
+    async def publish_control_status(status: str) -> None:
+        await live_server.publish_envelope(
+            {
+                "type": "control_status",
+                "session_id": session_id,
+                "status": status,
+                "paused": runtime["paused"],
+                "tick_id": runtime["tick_id"],
+            }
+        )
 
     async def on_command(payload: dict[str, Any]) -> dict[str, Any]:
         payload = {**payload, "session_id": payload.get("session_id") or session_id}
+        envelope_type = payload.get("type")
         async with lock:
-            return handle_ws_envelope(world, payload)
+            if envelope_type == "pause":
+                runtime["paused"] = True
+                response = {"type": "control_ack", "status": "paused", "ok": True, "session_id": session_id}
+            elif envelope_type == "resume":
+                runtime["paused"] = False
+                response = {"type": "control_ack", "status": "running", "ok": True, "session_id": session_id}
+            elif envelope_type == "reset":
+                runtime["world"] = load_world(scenario)
+                runtime["tick_id"] = 0
+                runtime["paused"] = False
+                runtime["ended"] = False
+                runtime["pending_actions"] = []
+                runtime["pending_invalid_actions"] = []
+                event = _tick_event(runtime["world"], 0, session_id=session_id, triggered_events=[])
+                await live_server.publish_envelope({"type": "tick", "session_id": session_id, "tick": event})
+                runtime["tick_id"] = 1
+                response = {"type": "control_ack", "status": "reset", "ok": True, "session_id": session_id}
+            elif envelope_type == "end_session":
+                runtime["ended"] = True
+                response = {"type": "control_ack", "status": "ended", "ok": True, "session_id": session_id}
+            else:
+                response = handle_ws_envelope(runtime["world"], payload)
+                details = response.get("details", {})
+                if response.get("ok"):
+                    runtime["pending_actions"].append(details.get("accepted_action", payload.get("command")))
+                else:
+                    runtime["pending_invalid_actions"].append(
+                        {"action": details.get("rejected_action", payload.get("command")), "reason": response.get("reason")}
+                    )
+        if envelope_type in {"pause", "resume", "reset", "end_session"}:
+            await publish_control_status(str(response["status"]))
+        return response
 
     app = create_live_asgi_app(live_server, on_command=on_command)
     config = uvicorn.Config(app, host=host, port=port, log_level="info", lifespan="off")
     server = uvicorn.Server(config)
     simulation_task = asyncio.create_task(
         _run_simulation(
-            world=world,
+            runtime=runtime,
             live_server=live_server,
             lock=lock,
             session_id=session_id,

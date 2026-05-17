@@ -117,7 +117,7 @@ def create_live_asgi_app(live_server: LiveTransportServer, *, on_command: Comman
                     queue = await live_server.subscribe_tick_stream()
                     forward_task = asyncio.create_task(forward_ticks(queue))
                     continue
-                if payload.get("type") == "command" and on_command is not None:
+                if payload.get("type") in {"command", "pause", "resume", "reset", "end_session"} and on_command is not None:
                     response = on_command(payload)
                     if asyncio.iscoroutine(response):
                         response = await response
