@@ -238,8 +238,50 @@ pre {
   font-size: 0.76rem;
 }
 
+.section-heading .status-pill {
+  position: static;
+  flex: 0 0 auto;
+  max-width: 170px;
+  padding: 6px 8px;
+  text-align: center;
+}
+
 .hud-primary {
   min-width: 0;
+}
+
+.top-hud-drawer {
+  min-width: 0;
+}
+
+.top-hud-summary {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+  padding-right: 12px;
+}
+
+.top-hud-summary::-webkit-details-marker {
+  display: none;
+}
+
+.top-hud-summary::before {
+  content: "-";
+  margin-top: 20px;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 0.9rem;
+  font-weight: 760;
+}
+
+.top-hud-drawer:not([open]) .top-hud-summary::before {
+  content: "+";
+}
+
+.top-hud-drawer:not([open]) .hud-inline {
+  display: none;
 }
 
 .hud-inline {
@@ -289,35 +331,164 @@ pre {
 }
 
 .live-mode #scenarioSummary,
+.live-mode #scorePanel,
 .live-mode #timelinePanel,
 .live-mode .tick-drawer,
-.live-mode .replay-controls {
+.live-mode .playback-control {
   display: none;
 }
 
 .live-control-panel {
   position: fixed;
-  z-index: 18;
+  z-index: 20;
   left: 16px;
   right: 396px;
   bottom: 16px;
-  max-height: 34vh;
-  overflow: auto;
+  min-height: 52px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  backdrop-filter: blur(10px);
 }
 
-.live-control-panel .timeline-row {
-  display: flex;
-  flex-wrap: wrap;
+.live-mode .live-control-panel {
+  left: calc((100vw - 424px) / 2);
+  right: auto;
+  bottom: 16px;
+  width: 340px;
+  min-width: 0;
+  transform: translateX(-50%);
+}
+
+.live-mode .live-command-card {
+  padding: 7px;
+}
+
+.live-mode .live-command-card .live-panel-title,
+.live-mode .live-command-card .command-hint {
+  display: none;
 }
 
 .live-control-panel .live-command-grid {
   display: grid;
-  grid-template-columns: minmax(280px, 0.8fr) minmax(320px, 1.2fr);
-  gap: 12px;
+  grid-template-columns: minmax(520px, 1fr);
+  align-items: start;
+  gap: 10px;
 }
 
-.live-control-panel article {
+.live-session-card,
+.live-command-card {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: rgba(3, 5, 6, 0.58);
+  padding: 8px;
+}
+
+.live-session-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px;
+}
+
+.live-mode .live-session-header {
+  position: fixed;
+  z-index: 22;
+  left: 16px;
+  bottom: 16px;
+  width: auto;
+  justify-content: center;
+  transform: none;
+  background: rgba(8, 13, 16, 0.9);
+  backdrop-filter: blur(10px);
+}
+
+.live-mode .live-session-header .live-button-row {
+  flex-wrap: nowrap;
+}
+
+.live-mode .live-session-header button {
+  min-width: 0;
+  padding: 0 8px;
+  font-size: 0.68rem;
+}
+
+.live-panel-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+
+.live-panel-title .eyebrow {
   margin-bottom: 0;
+}
+
+.live-command-fields {
+  display: grid;
+  align-items: center;
+  gap: 7px;
+}
+
+.live-session-header .live-button-row {
+  flex: 0 1 auto;
+  margin-top: 0;
+}
+
+.live-command-fields {
+  grid-template-columns: minmax(260px, 1fr) 78px;
+}
+
+.live-command-fields.needs-value {
+  grid-template-columns: minmax(260px, 1fr) 78px;
+}
+
+.live-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 7px;
+}
+
+.live-command-fields button {
+  white-space: nowrap;
+}
+
+.live-command-fields #commandText {
+  width: 100%;
+  font-family: var(--mono);
+  text-transform: uppercase;
+}
+
+.command-button-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(74px, 1fr));
+  gap: 5px;
+}
+
+.command-action {
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 7px;
+  overflow: hidden;
+  color: var(--muted-strong);
+  text-overflow: ellipsis;
+}
+
+.command-action.selected {
+  border-color: rgba(34, 244, 255, 0.7);
+  background: var(--accent-soft);
+  color: #d7feff;
+}
+
+.command-value-label {
+  justify-self: end;
+}
+
+#sendCommand {
+  min-width: 78px;
 }
 
 .live-game-layout {
@@ -329,7 +500,8 @@ pre {
   display: flex;
   width: 360px;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
+  overflow: hidden;
   pointer-events: none;
 }
 
@@ -342,15 +514,44 @@ pre {
 .live-strip-card,
 .live-log-card {
   grid-column: auto;
-  max-height: 28vh;
   overflow: auto;
+  padding: 10px;
+  background: rgba(3, 5, 6, 0.94);
+  backdrop-filter: blur(8px);
+}
+
+.live-status-card {
+  flex: 0 0 auto;
+  max-height: 34vh;
+}
+
+.live-alert-card {
+  flex: 0 0 auto;
+  max-height: 18vh;
+}
+
+.live-strip-card {
+  flex: 1 1 auto;
+  min-height: 130px;
+  max-height: none;
+}
+
+.live-log-card {
+  flex: 0 0 auto;
+  max-height: 16vh;
+}
+
+.live-status-card .summary-copy {
+  margin-top: 8px;
+  font-size: 0.86rem;
+  line-height: 1.45;
 }
 
 .live-stat-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 7px;
-  margin-top: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 10px;
 }
 
 .live-alert-list,
@@ -366,7 +567,7 @@ pre {
   border-left: 3px solid var(--accent);
   border-radius: 4px;
   background: #080d10;
-  padding: 8px 9px;
+  padding: 7px 8px;
   color: var(--muted-strong);
   font-family: var(--mono);
   font-size: 0.76rem;
@@ -394,14 +595,14 @@ pre {
 
 .flight-strip {
   display: grid;
-  grid-template-columns: minmax(86px, 0.82fr) minmax(150px, 1fr) minmax(92px, 0.74fr);
-  gap: 8px;
+  grid-template-columns: minmax(74px, 0.78fr) minmax(128px, 1fr) minmax(78px, 0.72fr) auto;
+  gap: 7px;
   width: 100%;
   min-height: 50px;
   border-color: var(--line);
   border-left: 3px solid var(--accent);
   background: #080d10;
-  padding: 8px 9px;
+  padding: 7px 8px;
   text-align: left;
 }
 
@@ -419,6 +620,10 @@ pre {
   color: #ffffff;
 }
 
+.flight-strip.selected {
+  background: rgba(34, 244, 255, 0.08);
+}
+
 .flight-strip.critical {
   border-left-color: var(--bad);
   background: var(--bad-soft);
@@ -430,7 +635,8 @@ pre {
 
 .strip-title,
 .strip-state,
-.strip-clearance {
+.strip-clearance,
+.strip-selector {
   display: grid;
   align-content: center;
   min-width: 0;
@@ -456,14 +662,32 @@ pre {
 .strip-state {
   color: var(--muted-strong);
   font-family: var(--mono);
-  font-size: 0.74rem;
+  font-size: 0.7rem;
   font-weight: 700;
+}
+
+.strip-selector {
+  min-height: 28px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  padding: 0 8px;
+  color: var(--muted-strong);
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.flight-strip.selected .strip-selector {
+  border-color: rgba(34, 244, 255, 0.7);
+  background: var(--accent-soft);
+  color: #d7feff;
 }
 
 .live-log-row {
   display: grid;
-  grid-template-columns: 80px minmax(0, 1fr);
-  gap: 8px;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 7px;
   border-bottom: 1px solid var(--line);
   padding-bottom: 7px;
   font-family: var(--mono);
@@ -485,14 +709,14 @@ pre {
 }
 
 .command-hint {
-  margin: 8px 0 0;
-  font-size: 0.8rem;
+  margin: 7px 0 0;
+  font-size: 0.74rem;
 }
 
 .command-feedback {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   font-family: var(--mono);
-  font-size: 0.82rem;
+  font-size: 0.76rem;
   font-weight: 650;
 }
 
@@ -618,18 +842,6 @@ pre {
   font-weight: 720;
 }
 
-.radar-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: 7px;
-}
-
-.radar-actions button {
-  min-height: 32px;
-}
-
 .radar-panel {
   position: absolute;
   inset: 0;
@@ -747,10 +959,76 @@ pre {
 
 .timeline-row {
   display: grid;
-  grid-template-columns: auto auto auto auto minmax(140px, 1fr) auto auto;
+  grid-template-columns: auto auto auto auto auto minmax(140px, 1fr) auto auto auto;
   align-items: center;
   gap: 9px;
-  margin-top: 11px;
+  margin-top: 0;
+}
+
+.bottom-hud {
+  position: fixed;
+  z-index: 19;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto minmax(220px, 1fr);
+  align-items: end;
+  gap: 28px;
+  pointer-events: none;
+}
+
+.bottom-hud > * {
+  pointer-events: auto;
+}
+
+.replay-controls {
+  justify-self: center;
+  width: min(760px, calc(100vw - 520px));
+  min-width: 640px;
+  min-height: 46px;
+  padding: 8px 10px;
+}
+
+.scope-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.live-mode .replay-controls {
+  width: auto;
+  min-width: 0;
+  grid-template-columns: auto auto;
+  pointer-events: none;
+}
+
+.live-mode .bottom-hud {
+  z-index: 21;
+  left: min(calc(100vw - 424px - 16px), calc((100vw - 424px) / 2 + 270px));
+  right: auto;
+  bottom: 16px;
+  top: auto;
+  display: block;
+  transform: none;
+  pointer-events: none;
+}
+
+.live-mode .bottom-hud > * {
+  pointer-events: auto;
+}
+
+.live-mode .bottom-hud > .replay-controls {
+  pointer-events: none;
+}
+
+.live-mode .replay-controls {
+  padding: 7px 8px;
+}
+
+.live-mode .scope-controls,
+.live-mode .scope-controls button {
+  pointer-events: auto;
 }
 
 .radar-heading {
@@ -759,12 +1037,6 @@ pre {
   left: 16px;
   top: 158px;
   width: min(520px, calc(100vw - 420px));
-}
-
-.radar-heading .radar-actions {
-  position: fixed;
-  right: 396px;
-  top: 158px;
 }
 
 #tickSlider {
@@ -782,8 +1054,137 @@ pre {
   top: 168px;
   right: 16px;
   width: 360px;
-  max-height: 28vh;
-  overflow: auto;
+  max-height: none;
+  overflow: hidden;
+}
+
+.inspector-panel .section-heading {
+  margin-bottom: 8px;
+}
+
+.inspector-panel h3 {
+  display: none;
+}
+
+.aircraft-glance {
+  border-left: 3px solid var(--accent);
+  padding-left: 10px;
+  --aircraft-color: var(--accent);
+}
+
+.aircraft-glance.departure {
+  border-left-color: var(--departure);
+  --aircraft-color: var(--departure);
+}
+
+.aircraft-glance.arrival {
+  border-left-color: var(--accent);
+  --aircraft-color: var(--accent);
+}
+
+.aircraft-glance.critical {
+  border-left-color: var(--bad);
+  --aircraft-color: var(--bad);
+}
+
+.aircraft-glance.warn {
+  border-left-color: var(--warn);
+  --aircraft-color: var(--warn);
+}
+
+.aircraft-glance-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.aircraft-glance-head b {
+  display: block;
+  color: var(--aircraft-color);
+  font-family: var(--mono);
+  font-size: 1.02rem;
+  letter-spacing: 0.02em;
+  line-height: 1.15;
+}
+
+.aircraft-glance-head span,
+.aircraft-glance-head em {
+  color: var(--muted-strong);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  font-style: normal;
+  font-weight: 720;
+  text-transform: uppercase;
+}
+
+.aircraft-glance-head em {
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--aircraft-color) 42%, transparent);
+  border-radius: 4px;
+  padding: 4px 6px;
+  color: var(--aircraft-color);
+}
+
+.aircraft-glance.critical .aircraft-glance-head em {
+  border-color: rgba(255, 47, 85, 0.5);
+  color: #ffd6dd;
+}
+
+.aircraft-glance.warn .aircraft-glance-head em {
+  border-color: rgba(255, 178, 63, 0.5);
+  color: #ffe1ad;
+}
+
+.aircraft-glance-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.aircraft-glance-metrics span {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #080d10;
+  padding: 9px 10px;
+}
+
+.aircraft-glance-metrics small {
+  display: block;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.aircraft-glance-metrics b {
+  display: block;
+  margin: 3px 0 2px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 1.08rem;
+  line-height: 1;
+}
+
+.aircraft-glance-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.aircraft-glance-tags span {
+  border: 1px solid color-mix(in srgb, var(--aircraft-color) 34%, var(--line));
+  border-radius: 4px;
+  padding: 4px 6px;
+  color: var(--muted-strong);
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
 }
 
 dl {
@@ -968,11 +1369,8 @@ dd {
 }
 
 #timelinePanel {
-  position: fixed;
-  z-index: 18;
-  left: 16px;
-  bottom: 16px;
-  width: min(440px, calc(50vw - 24px));
+  justify-self: start;
+  width: 100%;
   max-height: 38vh;
   overflow: auto;
 }
@@ -1020,11 +1418,8 @@ dd {
 }
 
 .tick-drawer {
-  position: fixed;
-  z-index: 18;
-  right: 16px;
-  bottom: 16px;
-  width: min(360px, calc(50vw - 24px));
+  justify-self: end;
+  width: 100%;
   max-height: 38vh;
   overflow: auto;
 }
@@ -1114,11 +1509,6 @@ dd {
     width: calc(100vw - 32px);
   }
 
-  .radar-heading .radar-actions {
-    right: 16px;
-    top: 192px;
-  }
-
   .radar-meta {
     top: 222px;
     max-width: calc(100vw - 32px);
@@ -1133,17 +1523,25 @@ dd {
     max-height: 32vh;
   }
 
+  .bottom-hud {
+    grid-template-columns: minmax(220px, 1fr) auto minmax(220px, 1fr);
+    gap: 16px;
+  }
+
   #timelinePanel,
-  .tick-drawer,
+  .tick-drawer {
+    max-height: 34vh;
+  }
+
+  .replay-controls {
+    width: min(460px, calc(42vw - 20px));
+    min-width: 360px;
+  }
+
   .live-control-panel {
     left: 16px;
     right: 16px;
     width: auto;
-    max-height: 34vh;
-  }
-
-  #timelinePanel {
-    bottom: 16px;
   }
 
   .summary-band {
@@ -1153,6 +1551,7 @@ dd {
   .live-control-panel .live-command-grid {
     grid-template-columns: 1fr;
   }
+
 }
 
 @media (max-width: 720px) {
@@ -1178,8 +1577,6 @@ dd {
   .radar-heading,
   .radar-meta,
   .summary-band,
-  #timelinePanel,
-  .tick-drawer,
   .live-control-panel,
   .inspector-panel,
   .live-game-layout {
@@ -1193,12 +1590,6 @@ dd {
     top: 248px;
   }
 
-  .radar-heading .radar-actions {
-    position: static;
-    margin-top: 8px;
-    justify-content: flex-start;
-  }
-
   .radar-meta {
     top: 326px;
   }
@@ -1206,6 +1597,29 @@ dd {
   .timeline-row {
     display: flex;
     flex-wrap: wrap;
+  }
+
+  .bottom-hud {
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .replay-controls {
+    width: auto;
+    min-width: 0;
+    justify-self: stretch;
+  }
+
+  #timelinePanel,
+  .tick-drawer {
+    justify-self: stretch;
+  }
+
+  .tick-drawer {
+    order: 3;
   }
 
   .timeline-row button {

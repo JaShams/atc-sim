@@ -25,8 +25,8 @@ const zoomOut = document.getElementById('zoomOut');
 const resetView = document.getElementById('resetView');
 const modeSelect = document.getElementById('modeSelect');
 const modeStatus = document.getElementById('modeStatus');
+const liveSessionControls = document.getElementById('liveSessionControls');
 const livePanel = document.getElementById('livePanel');
-const liveEndpointInput = document.getElementById('liveEndpoint');
 const liveConnect = document.getElementById('liveConnect');
 const liveDisconnect = document.getElementById('liveDisconnect');
 const livePause = document.getElementById('livePause');
@@ -40,12 +40,14 @@ const liveStats = document.getElementById('liveStats');
 const liveAlerts = document.getElementById('liveAlerts');
 const liveStrips = document.getElementById('liveStrips');
 const liveEventLog = document.getElementById('liveEventLog');
-const commandAircraft = document.getElementById('commandAircraft');
+const commandText = document.getElementById('commandText');
 const commandType = document.getElementById('commandType');
 const commandValue = document.getElementById('commandValue');
+const commandValueLabel = document.querySelector('.command-value-label');
 const sendCommand = document.getElementById('sendCommand');
 const commandHint = document.getElementById('commandHint');
 const commandFeedback = document.getElementById('commandFeedback');
+const commandActions = Array.from(document.querySelectorAll('.command-action'));
 
 let traceEvents = [];
 let score = null;
@@ -71,6 +73,8 @@ let livePaused = false;
 let liveLogEntries = [];
 let radarScopeRangeNm = 80;
 let liveResetPending = false;
+
+const DEFAULT_LIVE_ENDPOINT = 'ws://localhost:8080/live';
 
 const LIVE_INTERPOLATION = {
   lagMs: 220,
@@ -177,8 +181,16 @@ livePause.addEventListener('click', () => sendLiveControl(livePaused ? 'resume' 
 liveReset.addEventListener('click', () => sendLiveControl('reset'));
 liveEnd.addEventListener('click', () => sendLiveControl('end_session'));
 sendCommand.addEventListener('click', sendLiveCommand);
-commandType.addEventListener('change', syncCommandFormForType);
+commandActions.forEach((button) => {
+  button.addEventListener('click', () => selectCommandType(button.dataset.commandType));
+});
 commandValue.addEventListener('input', () => setCommandFeedback(null, ''));
+commandText.addEventListener('input', () => setCommandFeedback(null, ''));
+commandText.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter') return;
+  event.preventDefault();
+  sendLiveCommand();
+});
 
 const COMMAND_SCHEMA = {
   no_op: { label: 'No action', unitHint: null },
@@ -266,6 +278,7 @@ function handleModeChange() {
   const isLive = currentMode === 'live';
   document.body.classList.toggle('live-mode', isLive);
   livePanel.hidden = !isLive;
+  liveSessionControls.hidden = !isLive;
   liveGamePanel.hidden = !isLive;
   traceFileInput.closest('section').hidden = isLive;
   modeStatus.textContent = isLive
@@ -290,7 +303,7 @@ function syncRadarControlsForMode() {
 }
 
 function connectLiveTransport() {
-  const endpoint = (liveEndpointInput.value || '').trim();
+  const endpoint = resolveLiveEndpoint();
   if (!endpoint) return;
   disconnectLiveTransport();
   resetLiveRunState();
@@ -362,7 +375,8 @@ function resetLiveRunState() {
   zoomIn.disabled = true;
   zoomOut.disabled = true;
   resetView.disabled = true;
-  clearNode(commandAircraft);
+  selectedCallsign = null;
+  updateSelectedAircraftCommand();
   renderLiveDashboard(null);
   syncLiveControlButtons();
 }
@@ -375,6 +389,7 @@ function resetLiveSessionView() {
   currentTickIndex = 0;
   selectedCallsign = null;
   hoveredCallsign = null;
+  updateSelectedAircraftCommand();
   liveSnapshotsByCallsign.clear();
   latestLiveArrivalMs = 0;
   liveFollowTail = true;
@@ -571,8 +586,7 @@ function renderFlightStrips(event, aircraft) {
     if (conflictSet.has(ac.callsign)) strip.classList.add('critical');
     else if (predictedSet.has(ac.callsign) || ac.emergency) strip.classList.add('warn');
     strip.addEventListener('click', () => {
-      selectedCallsign = ac.callsign;
-      commandAircraft.value = ac.callsign;
+      selectAircraftForCommand(selectedCallsign === ac.callsign ? null : ac.callsign);
       drawCurrentRadar();
       renderAircraftPanel(traceEvents[currentTickIndex], selectedCallsign);
     });
@@ -587,7 +601,10 @@ function renderFlightStrips(event, aircraft) {
     const clearance = document.createElement('span');
     clearance.className = 'strip-clearance';
     clearance.textContent = ac.clearance ? humanize(ac.clearance) : humanize(ac.status || 'airborne');
-    strip.append(title, state, clearance);
+    const selector = document.createElement('span');
+    selector.className = 'strip-selector';
+    selector.textContent = selectedCallsign === ac.callsign ? 'Selected' : 'Select';
+    strip.append(title, state, clearance, selector);
     liveStrips.appendChild(strip);
   });
 }
@@ -654,15 +671,17 @@ function startLiveFrameLoop() {
 
 function populateAircraftSelector(event) {
   const options = Object.keys(event?.state?.aircraft || {});
-  const previous = commandAircraft.value;
-  clearNode(commandAircraft);
-  options.forEach((callsign) => {
-    const node = document.createElement('option');
-    node.value = callsign;
-    node.textContent = callsign;
-    commandAircraft.appendChild(node);
-  });
-  if (options.includes(previous)) commandAircraft.value = previous;
+  if (selectedCallsign && !options.includes(selectedCallsign)) selectedCallsign = null;
+  updateSelectedAircraftCommand();
+}
+
+function selectAircraftForCommand(callsign) {
+  selectedCallsign = callsign || null;
+  updateSelectedAircraftCommand();
+}
+
+function updateSelectedAircraftCommand() {
+  // Keep strip/radar selection for visual focus; typed commands include the callsign.
 }
 
 function sendLiveCommand() {
@@ -678,7 +697,7 @@ function sendLiveCommand() {
     setCommandFeedback(null, 'Command sent. Waiting for controller response.');
     return;
   }
-  const endpoint = (liveEndpointInput.value || '').trim().replace(/\/$/, '');
+  const endpoint = resolveLiveEndpoint().replace(/\/$/, '');
   fetch(`${endpoint}/command`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(envelope) })
     .then(async (res) => {
       const payload = await res.json().catch(() => ({}));
@@ -695,11 +714,21 @@ function sendLiveCommand() {
     });
 }
 
+function resolveLiveEndpoint() {
+  return window.atcLiveEndpoint || DEFAULT_LIVE_ENDPOINT;
+}
+
 function buildLiveCommandEnvelope() {
-  const callsign = (commandAircraft.value || '').trim();
+  const parsed = parseCommandText(commandText.value);
+  if (parsed.ok) {
+    return { ok: true, envelope: { type: 'command', session_id: liveSessionId, command: parsed.command } };
+  }
+  if ((commandText.value || '').trim()) return parsed;
+
+  const callsign = selectedCallsign;
   const actionType = commandType.value;
   const schema = COMMAND_SCHEMA[actionType];
-  if (!callsign) return { ok: false, reason: 'Select a callsign.' };
+  if (!callsign) return { ok: false, reason: 'Select an aircraft from the radar or flight strips.' };
   if (!schema) return { ok: false, reason: 'Select a valid action type.' };
   const command = { aircraft: callsign, type: actionType };
   if (schema.field) {
@@ -714,11 +743,54 @@ function buildLiveCommandEnvelope() {
   return { ok: true, envelope: { type: 'command', session_id: liveSessionId, command } };
 }
 
+function parseCommandText(rawText) {
+  const raw = String(rawText || '').trim();
+  if (!raw) return { ok: false, reason: 'Enter a command.' };
+  const normalized = raw.toUpperCase().replace(/[,:/]+/g, ' ');
+  const tokens = normalized.split(/\s+/).filter(Boolean);
+  const aircraftIds = new Set(Object.keys(traceEvents[currentTickIndex]?.state?.aircraft || {}).map((item) => item.toUpperCase()));
+  const first = tokens[0] || '';
+  const hasExplicitAircraft = aircraftIds.has(first);
+  const aircraft = hasExplicitAircraft ? first : null;
+  const actionTokens = hasExplicitAircraft ? tokens.slice(1) : tokens;
+  if (!aircraft) return { ok: false, reason: 'Start with a callsign.' };
+  if (!actionTokens.length) return { ok: false, reason: 'Enter a command action.' };
+
+  const joined = actionTokens.join(' ');
+  const value = Number(actionTokens.find((token) => /^-?\d+(\.\d+)?$/.test(token)));
+  let type = null;
+  if (/^(NOOP|NO-OP|NONE|NO ACTION)$/.test(joined)) type = 'no_op';
+  else if (/^(HDG|HEADING)\b/.test(joined)) type = 'assign_heading';
+  else if (/^(ALT|ALTITUDE|CLIMB|DESCEND)\b/.test(joined)) type = 'assign_altitude';
+  else if (/^(SPD|SPEED)\b/.test(joined)) type = 'assign_speed';
+  else if (/^(LAND|CLEAR LAND|CLEARED LAND|CLEAR TO LAND)$/.test(joined)) type = 'clear_to_land';
+  else if (/^(TAKEOFF|TAKE OFF|CLEAR TAKEOFF|CLEAR FOR TAKEOFF)$/.test(joined)) type = 'clear_for_takeoff';
+  else if (/^(GA|GO AROUND|GOAROUND)$/.test(joined)) type = 'go_around';
+  else if (/^(HOLD SHORT|SHORT)$/.test(joined)) type = 'hold_short';
+  else if (/^(HOLD|HOLD POS|HOLD POSITION|POSITION)$/.test(joined)) type = 'hold_position';
+  if (!type) return { ok: false, reason: 'Unsupported command action.' };
+
+  const schema = COMMAND_SCHEMA[type];
+  const command = { aircraft, type };
+  if (schema.field) {
+    if (!Number.isFinite(value)) return { ok: false, reason: `Provide ${schema.unitHint}.` };
+    if (value < schema.min || value > schema.max) return { ok: false, reason: `${schema.label} must be ${schema.unitHint}.` };
+    command[schema.field] = value;
+  }
+  return { ok: true, command };
+}
+
 function syncCommandFormForType() {
   const schema = COMMAND_SCHEMA[commandType.value] || { unitHint: null };
   const needsNumeric = Boolean(schema.field);
+  commandValue.closest('.live-command-fields')?.classList.toggle('needs-value', needsNumeric);
+  commandActions.forEach((button) => {
+    button.classList.toggle('selected', button.dataset.commandType === commandType.value);
+  });
   commandValue.disabled = !needsNumeric;
   commandValue.required = needsNumeric;
+  commandValue.hidden = !needsNumeric;
+  if (commandValueLabel) commandValueLabel.hidden = !needsNumeric;
   commandValue.placeholder = schema.unitHint ? `Enter ${schema.unitHint}` : '';
   if (needsNumeric) {
     commandValue.min = String(schema.min);
@@ -732,6 +804,14 @@ function syncCommandFormForType() {
   commandHint.textContent = schema.unitHint
     ? `Value required: ${schema.unitHint}.`
     : 'No extra value required for this command.';
+  if (commandText) commandHint.textContent = 'Type commands like ARR1 HDG 090, ARR2 LAND, or DEP1 TAKEOFF.';
+}
+
+function selectCommandType(actionType) {
+  if (!COMMAND_SCHEMA[actionType]) return;
+  commandType.value = actionType;
+  syncCommandFormForType();
+  setCommandFeedback(null, '');
 }
 
 function extractCommandRejectionReason(payload) {
@@ -1520,28 +1600,42 @@ function renderRadarLegend() {
 function handleRadarMove(event) {
   if (isPanning) return;
   if (!radarTargets.length) return;
-  const rect = canvas.getBoundingClientRect();
-  const x = event.clientX - rect.left;
-  const y = event.clientY - rect.top;
-  const target = radarTargets.find((item) => Math.hypot(item.x - x, item.y - y) <= 14);
+  const point = radarPointFromEvent(event);
+  const target = point ? hitTestRadarTarget(point.x, point.y) : null;
   hoveredCallsign = target?.ac.callsign || null;
   drawCurrentRadar();
   if (!target) {
     hideRadarTooltip();
     return;
   }
+  const rect = canvas.getBoundingClientRect();
   radarTooltip.hidden = false;
   radarTooltip.style.left = `${event.clientX - rect.left + 14}px`;
   radarTooltip.style.top = `${event.clientY - rect.top + 14}px`;
   radarTooltip.innerHTML = renderAircraftTooltip(target);
 }
 
-function handleRadarClick() {
+function handleRadarClick(event) {
   if (isPanning) return;
-  if (!hoveredCallsign) return;
-  selectedCallsign = hoveredCallsign;
+  const point = radarPointFromEvent(event);
+  const target = point ? hitTestRadarTarget(point.x, point.y) : radarTargets.find((item) => item.ac.callsign === hoveredCallsign);
+  const nextCallsign = target?.ac.callsign || null;
+  selectAircraftForCommand(nextCallsign === selectedCallsign ? null : nextCallsign);
   drawCurrentRadar();
   renderAircraftPanel(traceEvents[currentTickIndex], selectedCallsign);
+}
+
+function radarPointFromEvent(event) {
+  if (!event || typeof event.clientX !== 'number' || typeof event.clientY !== 'number') return null;
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: event.clientX - rect.left,
+    y: event.clientY - rect.top
+  };
+}
+
+function hitTestRadarTarget(x, y) {
+  return radarTargets.find((item) => Math.hypot(item.x - x, item.y - y) <= 14) || null;
 }
 
 function hideRadarTooltip() {
@@ -1692,17 +1786,31 @@ function renderAircraftPanel(event, callsign) {
   }
   const conflictSet = aircraftSetFromRecords(event.conflicts || []);
   const predictedSet = aircraftSetFromRecords(event.predicted_conflicts || []);
-  appendText(aircraftPanel, 'h3', ac.callsign);
-  appendDefinitionList(aircraftPanel, {
-    Role: humanize(ac.role || 'aircraft'),
-    Status: humanize(ac.status || 'unknown'),
-    Altitude: `${Math.round(ac.altitude_ft)} ft`,
-    Speed: `${Math.round(ac.speed_kt)} kt`,
-    Heading: `${Math.round(ac.heading_deg)} degrees`,
-    Clearance: ac.clearance ? humanize(ac.clearance) : 'None',
-    Emergency: ac.emergency ? 'Yes' : 'No',
-    Conflict: conflictSet.has(callsign) ? 'Active now' : predictedSet.has(callsign) ? 'Predicted soon' : 'None detected'
-  });
+  const conflictState = conflictSet.has(callsign) ? 'Active conflict' : predictedSet.has(callsign) ? 'Predicted conflict' : 'Nominal';
+  const alertClass = conflictSet.has(callsign) ? 'critical' : predictedSet.has(callsign) || ac.emergency ? 'warn' : 'nominal';
+  const roleClass = String(ac.role || '').toLowerCase() === 'departure' ? 'departure' : 'arrival';
+  const card = document.createElement('div');
+  card.className = `aircraft-glance ${roleClass} ${alertClass}`;
+  card.innerHTML = `
+    <div class="aircraft-glance-head">
+      <div>
+        <b>${escapeHtml(ac.callsign)}</b>
+        <span>${escapeHtml(humanize(ac.role || 'aircraft'))} / ${escapeHtml(humanize(ac.status || 'unknown'))}</span>
+      </div>
+      <em>${escapeHtml(conflictState)}</em>
+    </div>
+    <div class="aircraft-glance-metrics">
+      <span><small>Alt</small><b>${Math.round(ac.altitude_ft)}</b><small>FT</small></span>
+      <span><small>Spd</small><b>${Math.round(ac.speed_kt)}</b><small>KT</small></span>
+      <span><small>Hdg</small><b>${Math.round(ac.heading_deg)}</b><small>DEG</small></span>
+    </div>
+    <div class="aircraft-glance-tags">
+      <span>${escapeHtml(ac.clearance ? humanize(ac.clearance) : 'No clearance')}</span>
+      <span>${ac.emergency ? 'Emergency' : 'No emergency'}</span>
+      <span>${escapeHtml(conflictState)}</span>
+    </div>
+  `;
+  aircraftPanel.appendChild(card);
 }
 
 function renderTickDetails(e) {

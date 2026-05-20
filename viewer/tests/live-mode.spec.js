@@ -71,9 +71,11 @@ test.describe('live mode viewer controls', () => {
 
   test('runs as a live game control surface', async ({ page }) => {
     await page.goto('/index.html');
+    await page.evaluate((port) => {
+      window.atcLiveEndpoint = `ws://127.0.0.1:${port}/live`;
+    }, livePort);
 
     await page.locator('#modeSelect').selectOption('live');
-    await page.locator('#liveEndpoint').fill(`ws://127.0.0.1:${livePort}/live`);
     await page.locator('#liveConnect').click();
 
     await expect(page.locator('#loadStatus')).toContainText('Live connected');
@@ -81,17 +83,16 @@ test.describe('live mode viewer controls', () => {
     await expect(page.locator('#liveRunState')).toContainText('Running');
     await expect(page.locator('#tickSlider')).toBeEnabled();
     await expect.poll(async () => Number(await page.locator('#tickSlider').getAttribute('max'))).toBeGreaterThan(0);
-    await expect.poll(async () => page.locator('#commandAircraft option').count()).toBeGreaterThan(0);
     await expect.poll(async () => page.locator('.flight-strip').count()).toBeGreaterThan(0);
 
     await page.locator('.flight-strip').first().click();
-    await expect(page.locator('#commandAircraft')).not.toHaveValue('');
+    await expect(page.locator('.flight-strip.selected .strip-selector')).toContainText('Selected');
 
     await page.locator('#zoomIn').click();
     await page.locator('#zoomOut').click();
 
-    await page.locator('#commandType').selectOption('assign_heading');
-    await page.locator('#commandValue').fill('90');
+    const callsign = (await page.locator('.flight-strip.selected .strip-title b').textContent()).trim();
+    await page.locator('#commandText').fill(`${callsign} HDG 090`);
     await page.locator('#sendCommand').click();
     await expect(page.locator('#commandFeedback')).toContainText(/Accepted|Rejected/);
     await expect(page.locator('#liveEventLog')).toContainText(/Accepted|Rejected/);

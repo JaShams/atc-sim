@@ -3,16 +3,20 @@ import RadarStage from './RadarStage.jsx';
 function Header() {
   return (
     <header className="app-header">
-      <div className="hud-primary">
-        <p className="eyebrow">ATC Benchmark</p>
-        <h1>Live + Replay Viewer</h1>
+      <details className="hud-primary top-hud-drawer" open>
+        <summary className="top-hud-summary">
+          <div>
+            <p className="eyebrow">ATC Benchmark</p>
+            <h1>Live + Replay Viewer</h1>
+          </div>
+        </summary>
         <div className="hud-inline">
           <ModeControls />
           <FileControls />
           <ScenarioSummary />
           <article className="panel hud-score-panel" id="scorePanel"></article>
         </div>
-      </div>
+      </details>
       <div id="loadStatus" className="status-pill" role="status">
         Load a trace file to begin. Score file optional.
       </div>
@@ -35,6 +39,20 @@ function ModeControls() {
   );
 }
 
+function LiveSessionControls() {
+  return (
+    <section className="live-session-card live-session-header" id="liveSessionControls" aria-label="Live session controls" hidden>
+      <div className="live-button-row">
+        <button id="liveConnect" type="button">Start</button>
+        <button id="liveDisconnect" type="button" disabled>Disconnect</button>
+        <button id="livePause" type="button" disabled>Pause</button>
+        <button id="liveReset" type="button" disabled>Reset</button>
+        <button id="liveEnd" type="button" disabled>End</button>
+      </div>
+    </section>
+  );
+}
+
 function FileControls() {
   return (
     <section className="panel controls file-controls" aria-label="Load replay files">
@@ -50,46 +68,20 @@ function FileControls() {
 
 function LiveControlPanel() {
   return (
-    <section className="panel live-control-panel" id="livePanel" aria-label="Live controller panel" hidden>
-      <div className="section-heading">
-        <div>
-          <p className="eyebrow">Live Game</p>
-          <h2>Session Control</h2>
-        </div>
-      </div>
+    <section className="live-control-panel overlay-panel" id="livePanel" aria-label="Live controller panel" hidden>
       <div className="live-command-grid">
-        <article className="panel">
-          <label htmlFor="liveEndpoint">Transport endpoint</label>
-          <input id="liveEndpoint" type="text" defaultValue="ws://localhost:8080/live" />
-          <div className="timeline-row">
-            <button id="liveConnect" type="button">Start</button>
-            <button id="liveDisconnect" type="button" disabled>Disconnect</button>
-            <button id="livePause" type="button" disabled>Pause</button>
-            <button id="liveReset" type="button" disabled>Reset Scenario</button>
-            <button id="liveEnd" type="button" disabled>End Session</button>
+        <article className="live-command-card">
+          <div className="live-panel-title">
+            <p className="eyebrow">Clearance</p>
+            <h2>Command</h2>
           </div>
-        </article>
-        <article className="panel">
-          <label htmlFor="commandAircraft">Aircraft</label>
-          <select id="commandAircraft"></select>
-          <label htmlFor="commandType">Command</label>
-          <select id="commandType" defaultValue="no_op">
-            <option value="no_op">No action</option>
-            <option value="assign_heading">Assign heading</option>
-            <option value="assign_altitude">Assign altitude</option>
-            <option value="assign_speed">Assign speed</option>
-            <option value="clear_to_land">Clear to land</option>
-            <option value="clear_for_takeoff">Clear for takeoff</option>
-            <option value="go_around">Go around</option>
-            <option value="hold_short">Hold short</option>
-            <option value="hold_position">Hold position</option>
-          </select>
-          <div className="timeline-row">
-            <label htmlFor="commandValue">Value</label>
-            <input id="commandValue" type="number" step="1" />
-            <button id="sendCommand" type="button" disabled>Send command</button>
+          <div className="live-command-fields">
+            <input id="commandType" type="hidden" defaultValue="no_op" />
+            <input id="commandText" type="text" autoComplete="off" spellCheck="false" placeholder="ARR1 HDG 090" />
+            <input id="commandValue" type="number" step="1" hidden />
+            <button id="sendCommand" type="button" disabled>Send</button>
           </div>
-          <p id="commandHint" className="muted command-hint">No extra value required for this command.</p>
+          <p id="commandHint" className="muted command-hint">Type commands like ARR1 HDG 090, ARR2 LAND, or DEP1 TAKEOFF.</p>
           <p id="commandFeedback" className="command-feedback" role="status" aria-live="polite"></p>
         </article>
       </div>
@@ -164,12 +156,6 @@ function RadarPanel() {
           <p className="eyebrow">Live Replay</p>
           <h2>Radar View</h2>
         </div>
-        <div className="radar-actions" aria-label="Radar view controls">
-          <span id="tickLabel" className="tick-readout">0 / 0</span>
-          <button id="zoomOut" className="icon-button" type="button" disabled aria-label="Set scope to 40 nautical miles" title="Set scope to 40 nautical miles">40nm</button>
-          <button id="zoomIn" className="icon-button" type="button" disabled aria-label="Set scope to 80 nautical miles" title="Set scope to 80 nautical miles">80nm</button>
-          <button id="resetView" type="button" disabled aria-label="Reset radar view" title="Reset radar view">Reset</button>
-        </div>
       </div>
       <div className="radar-wrap">
         <RadarStage />
@@ -182,20 +168,31 @@ function RadarPanel() {
           <input id="togglePrediction" type="checkbox" defaultChecked /> Show prediction overlay
         </label>
       </div>
-      <div className="timeline-row replay-controls overlay-panel" aria-label="Replay controls">
-        <button id="stepBack" className="icon-button" type="button" disabled aria-label="Previous tick" title="Previous tick">&#9664;</button>
-        <button id="playPause" type="button" disabled aria-label="Play replay" title="Play replay">Play</button>
-        <button id="stepForward" className="icon-button" type="button" disabled aria-label="Next tick" title="Next tick">&#9654;</button>
-        <label htmlFor="tickSlider">Time</label>
-        <input id="tickSlider" type="range" min="0" max="0" defaultValue="0" disabled />
-        <label htmlFor="playSpeed">Speed</label>
-        <select id="playSpeed" title="Replay speed" defaultValue="1000">
-          <option value="1000">1x</option>
-          <option value="500">2x</option>
-          <option value="250">4x</option>
-        </select>
-      </div>
     </article>
+  );
+}
+
+function ReplayControls() {
+  return (
+    <div className="timeline-row replay-controls overlay-panel" aria-label="Replay controls">
+      <button id="stepBack" className="icon-button playback-control" type="button" disabled aria-label="Previous tick" title="Previous tick">&#9664;</button>
+      <button id="playPause" className="playback-control" type="button" disabled aria-label="Play replay" title="Play replay">Play</button>
+      <button id="stepForward" className="icon-button playback-control" type="button" disabled aria-label="Next tick" title="Next tick">&#9654;</button>
+      <span id="tickLabel" className="tick-readout">0 / 0</span>
+      <label className="playback-control" htmlFor="tickSlider">Time</label>
+      <input id="tickSlider" className="playback-control" type="range" min="0" max="0" defaultValue="0" disabled />
+      <div className="scope-controls" aria-label="Radar scope controls">
+        <button id="zoomOut" className="icon-button" type="button" disabled aria-label="Set scope to 40 nautical miles" title="Set scope to 40 nautical miles">40nm</button>
+        <button id="zoomIn" className="icon-button" type="button" disabled aria-label="Set scope to 80 nautical miles" title="Set scope to 80 nautical miles">80nm</button>
+        <button id="resetView" type="button" disabled aria-label="Reset radar view" title="Reset radar view">Reset</button>
+      </div>
+      <label className="playback-control" htmlFor="playSpeed">Speed</label>
+      <select id="playSpeed" className="playback-control" title="Replay speed" defaultValue="1000">
+        <option value="1000">1x</option>
+        <option value="500">2x</option>
+        <option value="250">4x</option>
+      </select>
+    </div>
   );
 }
 
@@ -245,15 +242,25 @@ function TimelinePanel() {
   );
 }
 
+function BottomHud() {
+  return (
+    <section className="bottom-hud" aria-label="Replay bottom HUD">
+      <TimelinePanel />
+      <ReplayControls />
+      <SecondaryPanels />
+    </section>
+  );
+}
+
 export default function App() {
   return (
     <main>
       <Header />
+      <LiveSessionControls />
       <LiveControlPanel />
       <LiveDashboard />
       <ReplayLayout />
-      <SecondaryPanels />
-      <TimelinePanel />
+      <BottomHud />
     </main>
   );
 }
