@@ -1,4 +1,4 @@
-import { useId, useMemo } from 'react';
+import { useId, useMemo, useState } from 'react';
 import RadarStage from './RadarStage.jsx';
 import useViewerState, {
   countPhrase,
@@ -12,18 +12,6 @@ import useViewerState, {
   isSafetyTriggeredCall,
   prettifyScenarioName
 } from './useViewerState.js';
-
-const COMMAND_ACTIONS = [
-  ['no_op', 'No action'],
-  ['assign_heading', 'Heading'],
-  ['assign_altitude', 'Altitude'],
-  ['assign_speed', 'Speed'],
-  ['clear_to_land', 'Land'],
-  ['clear_for_takeoff', 'Takeoff'],
-  ['go_around', 'Go around'],
-  ['hold_short', 'Hold short'],
-  ['hold_position', 'Hold position']
-];
 
 function aircraftSetFromRecords(records = []) {
   return new Set(records.flatMap((record) => (Array.isArray(record.aircraft) ? record.aircraft : [record.a, record.b].filter(Boolean))));
@@ -80,15 +68,6 @@ function summarizeAction(actions) {
   return actions.map(describeAction).join('; ');
 }
 
-function buildLiveObjectiveCopy(aircraft, runway, emergencies) {
-  const arrivals = aircraft.filter((ac) => ac.role === 'arrival').length;
-  const departures = aircraft.filter((ac) => ac.role === 'departure').length;
-  const parts = [`Sequence ${countPhrase(arrivals, 'arrival')} and ${countPhrase(departures, 'departure')} around runway ${runway}.`];
-  if (emergencies) parts.push(`Prioritize ${countPhrase(emergencies, 'emergency aircraft')}.`);
-  parts.push('Keep separation, protect the runway, and issue clearances from the aircraft strips or command panel.');
-  return parts.join(' ');
-}
-
 function Stat({ label, value, help }) {
   return (
     <div className="stat" title={help}>
@@ -109,12 +88,33 @@ function SectionHeading({ eyebrow, title }) {
   );
 }
 
+function DisclosurePanel({ title, children, className = '', triggerClassName = '', contentClassName = '', defaultOpen = false }) {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+  const contentId = useId();
+  return (
+    <section className={`disclosure-panel ${isOpen ? 'is-open' : 'is-closed'} ${className}`.trim()}>
+      <button
+        className={`disclosure-trigger ${triggerClassName}`.trim()}
+        type="button"
+        aria-expanded={isOpen}
+        aria-controls={contentId}
+        onClick={() => setIsOpen((open) => !open)}
+      >
+        <span className="disclosure-icon" aria-hidden="true"></span>
+        <span className="disclosure-title">{title}</span>
+      </button>
+      <div id={contentId} className={`disclosure-content ${contentClassName}`.trim()} hidden={!isOpen}>
+        {children}
+      </div>
+    </section>
+  );
+}
+
 function TechnicalDetails({ label, value }) {
   return (
-    <details className="technical-details">
-      <summary>{label}</summary>
+    <DisclosurePanel className="technical-details" title={label}>
       <pre>{JSON.stringify(value || {}, null, 2)}</pre>
-    </details>
+    </DisclosurePanel>
   );
 }
 
@@ -171,37 +171,36 @@ function ComponentTable({ explanation, componentTotals = {} }) {
 function Header({ state }) {
   return (
     <header className="app-header">
-      <details className="hud-primary top-hud-drawer" open>
-        <summary className="top-hud-summary">
-          <div>
-            <p className="eyebrow">ATC Benchmark</p>
-            <h1>Live + Replay Viewer</h1>
-          </div>
-        </summary>
-        <div className="hud-inline">
-          <ModeControls state={state} />
-          <FileControls state={state} />
-          <ScenarioSummary state={state} />
-          <ScorePanel score={state.score} />
-        </div>
-      </details>
+      <div className="app-title">
+        <p className="eyebrow">ATC Benchmark</p>
+        <h1>Live + Replay Viewer</h1>
+      </div>
+      <ModeControls state={state} />
       <div className="status-pill load-status" role="status">{state.loadStatus}</div>
     </header>
   );
 }
 
 function ModeControls({ state }) {
+  const isLive = state.currentMode === 'live';
   return (
     <section className="panel controls mode-controls" aria-label="Viewer mode">
-      <label>
-        <span>Mode</span>
-        <select aria-label="Mode" value={state.currentMode} onChange={(event) => state.handleModeChange(event.target.value)}>
-          <option value="replay">Replay mode</option>
-          <option value="live">Live mode</option>
-        </select>
+      <label className="mode-switch">
+        <span className="mode-label">Replay</span>
+        <input
+          aria-label="Live mode"
+          role="switch"
+          type="checkbox"
+          checked={isLive}
+          onChange={(event) => state.handleModeChange(event.target.checked ? 'live' : 'replay')}
+        />
+        <span className="mode-track" aria-hidden="true">
+          <span className="mode-thumb"></span>
+        </span>
+        <span className="mode-label">Live</span>
       </label>
       <span className="muted">
-        {state.currentMode === 'live' ? 'Live mode streams ticks from the backend.' : 'Replay mode loads files from disk.'}
+        {isLive ? 'Live mode streams ticks from the backend.' : 'Replay mode loads files from disk.'}
       </span>
     </section>
   );
@@ -316,17 +315,36 @@ function ScorePanel({ score }) {
 function LiveSessionControls({ state }) {
   const isLive = state.currentMode === 'live';
   const connected = state.liveConnectionState;
+  const [showMore, setShowMore] = useState(false);
   if (!isLive) return null;
+  const confirmLiveControl = (control, label) => {
+    if (!window.confirm(`${label} the live session?`)) return;
+    state.sendLiveControl(control);
+    setShowMore(false);
+  };
   return (
     <section className="live-session-card live-session-header" aria-label="Live session controls">
+      <span className="status-pill live-run-state">{state.liveRunState}</span>
       <div className="live-button-row">
-        <button type="button" onClick={state.connectLiveTransport} disabled={connected}>Start</button>
-        <button type="button" onClick={state.disconnectLiveTransport} disabled={!connected}>Disconnect</button>
-        <button type="button" onClick={() => state.sendLiveControl(state.livePaused ? 'resume' : 'pause')} disabled={!connected}>
-          {state.livePaused ? 'Resume' : 'Pause'}
-        </button>
-        <button type="button" onClick={() => state.sendLiveControl('reset')} disabled={!connected}>Reset</button>
-        <button type="button" onClick={() => state.sendLiveControl('end_session')} disabled={!connected}>End</button>
+        {!connected ? (
+          <button type="button" onClick={state.connectLiveTransport}>Start</button>
+        ) : (
+          <>
+            <button type="button" onClick={() => state.sendLiveControl(state.livePaused ? 'resume' : 'pause')}>
+              {state.livePaused ? 'Resume' : 'Pause'}
+            </button>
+            <button type="button" onClick={state.disconnectLiveTransport}>Disconnect</button>
+            <div className="live-more-actions">
+              <button type="button" aria-expanded={showMore} aria-controls="liveDangerActions" onClick={() => setShowMore((open) => !open)}>More</button>
+              {showMore && (
+                <div id="liveDangerActions" className="live-danger-menu">
+                  <button type="button" onClick={() => confirmLiveControl('reset', 'Reset')}>Reset</button>
+                  <button type="button" onClick={() => confirmLiveControl('end_session', 'End')}>End</button>
+                </div>
+              )}
+            </div>
+          </>
+        )}
       </div>
     </section>
   );
@@ -341,18 +359,6 @@ function LiveControlPanel({ state }) {
           <div className="live-panel-title">
             <p className="eyebrow">Clearance</p>
             <h2>Command</h2>
-          </div>
-          <div className="command-button-grid" aria-label="Command shortcuts">
-            {COMMAND_ACTIONS.map(([type, label]) => (
-              <button
-                key={type}
-                type="button"
-                className={`command-action ${state.commandType === type ? 'selected' : ''}`}
-                onClick={() => state.selectCommandType(type)}
-              >
-                {label}
-              </button>
-            ))}
           </div>
           <div className="live-command-fields">
             <input
@@ -381,51 +387,43 @@ function LiveControlPanel({ state }) {
 }
 
 function LiveDashboard({ state, event }) {
+  const [activeTab, setActiveTab] = useState('alerts');
   if (state.currentMode !== 'live') return null;
-  const hasState = Boolean(event?.state);
   const aircraft = Object.values(event?.state?.aircraft || {});
-  const conflicts = event?.conflicts || [];
-  const predicted = event?.predicted_conflicts || [];
-  const airport = event?.state?.airport || {};
-  const runway = airport.active_runway || airport.runway_id || 'unknown';
-  const completed = aircraft.filter((ac) => ac.status === 'landed' || ac.status === 'exited_airspace').length;
   const emergencies = aircraft.filter((ac) => ac.emergency).length;
-  const runwayStatus = airport.runway_occupied_by ? `${runway} occupied by ${airport.runway_occupied_by}` : `${runway} clear`;
   return (
-    <section className="live-game-layout" aria-label="Live game dashboard">
-      <article className="panel live-status-card">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Objective</p>
-            <h2>{hasState ? `${runway} control` : 'Start a live session'}</h2>
-          </div>
-          <span className="status-pill live-run-state">{state.liveRunState}</span>
-        </div>
-        <p className="summary-copy">{hasState ? buildLiveObjectiveCopy(aircraft, runway, emergencies) : 'Start live mode to control traffic in real time.'}</p>
-        <div className="live-stat-grid">
-          {hasState ? (
-            <>
-              <Stat label="Clock" value={`${event.time}s`} help="Current simulation clock." />
-              <Stat label="Aircraft" value={String(aircraft.length)} help="Tracked aircraft in the live session." />
-              <Stat label="Completed" value={String(completed)} help="Aircraft landed or exited airspace." />
-              <Stat label="Conflicts" value={String(conflicts.length)} help="Active aircraft separation conflicts." />
-              <Stat label="Predicted" value={String(predicted.length)} help="Projected conflicts in the lookahead window." />
-              <Stat label="Runway" value={runwayStatus} help="Current runway state." />
-            </>
-          ) : (
-            <>
-              <Stat label="Clock" value="0s" help="Current simulation clock." />
-              <Stat label="Aircraft" value="0" help="Tracked aircraft in the live session." />
-              <Stat label="Conflicts" value="0" help="Active aircraft separation conflicts." />
-              <Stat label="Runway" value="-" help="Current runway state." />
-            </>
-          )}
-        </div>
-      </article>
-      <LiveAlerts event={event} emergencies={emergencies} />
-      <FlightStrips state={state} event={event} aircraft={aircraft} />
-      <LiveEventLog entries={state.liveLogEntries} />
-    </section>
+    <aside className="live-game-layout" aria-label="Live game dashboard">
+      <div className="live-sidebar-tabs" role="tablist" aria-label="Live sidebar">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'alerts'}
+          aria-controls="liveAlertsPanel"
+          id="liveAlertsTab"
+          onClick={() => setActiveTab('alerts')}
+        >
+          Alerts
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'log'}
+          aria-controls="liveLogPanel"
+          id="liveLogTab"
+          onClick={() => setActiveTab('log')}
+        >
+          Log
+        </button>
+      </div>
+      <div className="live-sidebar-body">
+        {activeTab === 'alerts' ? (
+          <LiveAlerts event={event} emergencies={emergencies} />
+        ) : (
+          <LiveEventLog entries={state.liveLogEntries} />
+        )}
+      </div>
+      <LiveControlPanel state={state} />
+    </aside>
   );
 }
 
@@ -445,7 +443,7 @@ function LiveAlerts({ event, emergencies }) {
   });
   if (emergencies) alerts.push({ key: 'emergency-priority', level: 'critical', text: `${countPhrase(emergencies, 'emergency aircraft')} require priority.` });
   return (
-    <article className="panel live-alert-card">
+    <article id="liveAlertsPanel" className="panel live-alert-card" role="tabpanel" aria-labelledby="liveAlertsTab">
       <SectionHeading eyebrow="Alerts" title="Controller Queue" />
       <div className="live-alert-list">
         {alerts.length ? alerts.slice(0, 8).map((alert) => (
@@ -456,39 +454,9 @@ function LiveAlerts({ event, emergencies }) {
   );
 }
 
-function FlightStrips({ state, event, aircraft }) {
-  const conflictSet = aircraftSetFromRecords(event?.conflicts || []);
-  const predictedSet = aircraftSetFromRecords(event?.predicted_conflicts || []);
-  return (
-    <article className="panel live-strip-card">
-      <SectionHeading eyebrow="Aircraft" title="Flight Strips" />
-      <div className="flight-strip-list">
-        {aircraft.length ? aircraft.map((ac) => {
-          const selected = state.selectedCallsign === ac.callsign;
-          const roleClass = String(ac.role || '').toLowerCase();
-          const alertClass = conflictSet.has(ac.callsign) ? 'critical' : predictedSet.has(ac.callsign) || ac.emergency ? 'warn' : '';
-          return (
-            <button
-              key={ac.callsign}
-              type="button"
-              className={`flight-strip ${roleClass} ${selected ? 'selected' : ''} ${alertClass}`.trim()}
-              onClick={() => state.selectAircraftForCommand(selected ? null : ac.callsign)}
-            >
-              <span className="strip-title"><b>{ac.callsign}</b><span>{humanize(ac.role || 'aircraft')}</span></span>
-              <span className="strip-state">{Math.round(ac.altitude_ft)} ft | {Math.round(ac.speed_kt)} kt | HDG {Math.round(ac.heading_deg)}</span>
-              <span className="strip-clearance">{ac.clearance ? humanize(ac.clearance) : humanize(ac.status || 'airborne')}</span>
-              <span className="strip-selector">{selected ? 'Selected' : 'Select'}</span>
-            </button>
-          );
-        }) : <p className="muted">Flight strips appear after the first tick.</p>}
-      </div>
-    </article>
-  );
-}
-
 function LiveEventLog({ entries }) {
   return (
-    <article className="panel live-log-card">
+    <article id="liveLogPanel" className="panel live-log-card" role="tabpanel" aria-labelledby="liveLogTab">
       <SectionHeading eyebrow="Log" title="Recent Events" />
       <div className="live-event-log">
         {entries.length ? entries.map((entry) => (
@@ -505,12 +473,6 @@ function LiveEventLog({ entries }) {
 function RadarPanel({ state }) {
   return (
     <article className="panel radar-panel">
-      <div className="section-heading radar-heading">
-        <div>
-          <p className="eyebrow">Live Replay</p>
-          <h2>Radar View</h2>
-        </div>
-      </div>
       <div className="radar-wrap">
         <RadarStage
           traceEvents={state.traceEvents}
@@ -529,13 +491,31 @@ function RadarPanel({ state }) {
           latestLiveArrivalMs={state.latestLiveArrivalMs}
         />
       </div>
-      <div className="radar-meta overlay-panel">
-        <div className="radar-legend" aria-label="Radar legend"></div>
-        <label className="legend-toggle" title="Show 1-3 minute projected path for the selected aircraft.">
-          <input type="checkbox" checked={state.showPredictionOverlay} onChange={(event) => state.setShowPredictionOverlay(event.target.checked)} /> Show prediction overlay
-        </label>
-      </div>
     </article>
+  );
+}
+
+function RadarScopeControls({ state, hasTrace }) {
+  return (
+    <div className="scope-controls" aria-label="Radar scope controls">
+      <button className="icon-button" type="button" disabled={!hasTrace} aria-label="Set scope to 40 nautical miles" title="Set scope to 40 nautical miles" onClick={() => state.handleZoom('out')}>40nm</button>
+      <button className="icon-button" type="button" disabled={!hasTrace} aria-label="Set scope to 80 nautical miles" title="Set scope to 80 nautical miles" onClick={() => state.handleZoom('in')}>80nm</button>
+      <button type="button" disabled={!hasTrace} aria-label={state.currentMode === 'live' ? 'Return to latest live traffic' : 'Reset radar view'} title={state.currentMode === 'live' ? 'Return to latest live traffic' : 'Reset radar view'} onClick={state.handleResetView}>
+        {state.currentMode === 'live' ? 'Live' : 'Reset'}
+      </button>
+      <label className="prediction-toggle" title="Show 1-3 minute projected path for the selected aircraft.">
+        <input type="checkbox" checked={state.showPredictionOverlay} onChange={(event) => state.setShowPredictionOverlay(event.target.checked)} /> Prediction
+      </label>
+    </div>
+  );
+}
+
+function LiveRadarControls({ state }) {
+  const hasTrace = state.traceEvents.length > 0;
+  return (
+    <section className="live-radar-controls overlay-panel" aria-label="Live radar controls">
+      <RadarScopeControls state={state} hasTrace={hasTrace} />
+    </section>
   );
 }
 
@@ -567,13 +547,7 @@ function ReplayControls({ state }) {
         disabled={!hasTrace}
         onChange={(event) => state.setCurrentTickIndex?.(Number(event.target.value))}
       />
-      <div className="scope-controls" aria-label="Radar scope controls">
-        <button className="icon-button" type="button" disabled={!hasTrace} aria-label="Set scope to 40 nautical miles" title="Set scope to 40 nautical miles" onClick={() => state.handleZoom('out')}>40nm</button>
-        <button className="icon-button" type="button" disabled={!hasTrace} aria-label="Set scope to 80 nautical miles" title="Set scope to 80 nautical miles" onClick={() => state.handleZoom('in')}>80nm</button>
-        <button type="button" disabled={!hasTrace} aria-label={state.currentMode === 'live' ? 'Return to latest live traffic' : 'Reset radar view'} title="Reset radar view" onClick={state.handleResetView}>
-          {state.currentMode === 'live' ? 'Live' : 'Reset'}
-        </button>
-      </div>
+      <RadarScopeControls state={state} hasTrace={hasTrace} />
       <label className="playback-control" htmlFor={speedId}>Speed</label>
       <select id={speedId} className="playback-control" aria-label="Replay speed" title="Replay speed" value={state.playSpeed} onChange={(event) => state.setPlaySpeed(Number(event.target.value))}>
         <option value="1000">1x</option>
@@ -625,56 +599,52 @@ function AircraftPanel({ event, selectedCallsign }) {
   );
 }
 
-function ReplayLayout({ state, event }) {
+function TickPanel({ event, embedded = false }) {
+  const body = (
+    <article>
+      <SectionHeading eyebrow="Now" title="Current Tick" />
+      {event ? (
+        <>
+          <section className="sub-panel">
+            <h3>Current Situation</h3>
+            <p>At {event.time}s, {countPhrase(Object.values(event.state?.aircraft || {}).length, 'aircraft')} {Object.values(event.state?.aircraft || {}).length === 1 ? 'is' : 'are'} in the replay. {describeConflicts(event.conflicts || [], event.predicted_conflicts || [])}</p>
+            <ReadableList title="Why the controller was called" items={(event.decision_points || []).map(describeDecisionPoint)} emptyText="No safety or scheduling issue triggered a controller call on this tick." />
+          </section>
+          <section className="sub-panel">
+            <h3>Controller Action</h3>
+            <ReadableList title="Issued command" items={(event.tick_explanation?.action_chosen || event.actions || []).map(describeAction)} emptyText="The controller issued no command." />
+            {(event.invalid_actions || []).length > 0 && <ReadableList title="Rejected command" items={(event.invalid_actions || []).map(describeInvalidAction)} emptyText="No rejected commands." />}
+          </section>
+          <section className="sub-panel">
+            <h3>Outcome</h3>
+            <span className={`outcome-badge outcome-${event.tick_explanation?.outcome?.kind || 'unknown'}`}>{humanize(event.tick_explanation?.outcome?.kind || 'unknown')}</span>
+            <p>{describeOutcome(event.tick_explanation?.outcome?.kind || 'unknown', Number(event.tick_explanation?.score_after || 0) - Number(event.tick_explanation?.score_before || 0), event.tick_explanation || {})}</p>
+            <ComponentTable explanation={event.tick_explanation || {}} />
+          </section>
+          <TechnicalDetails label="Technical tick JSON" value={{
+            decision_points: event.decision_points,
+            actions: event.actions,
+            invalid_actions: event.invalid_actions,
+            conflicts: event.conflicts,
+            predicted_conflicts: event.predicted_conflicts,
+            triggered_events: event.triggered_events,
+            tick_explanation: event.tick_explanation
+          }} />
+        </>
+      ) : <p className="muted">Load a trace file to see tick details.</p>}
+    </article>
+  );
+  if (embedded) {
+    return <section className="panel replay-sidebar-panel tick-drawer">{body}</section>;
+  }
   return (
-    <section className="replay-layout">
-      <RadarPanel state={state} />
-      {state.currentMode !== 'live' && <AircraftPanel event={event} selectedCallsign={state.selectedCallsign} />}
-    </section>
+    <DisclosurePanel className="panel hud-drawer tick-drawer" title="Current Tick" contentClassName="hud-drawer-body">
+      {body}
+    </DisclosurePanel>
   );
 }
 
-function TickPanel({ event }) {
-  return (
-    <details className="panel hud-drawer tick-drawer">
-      <summary>Current Tick</summary>
-      <article>
-        <SectionHeading eyebrow="Now" title="Current Tick" />
-        {event ? (
-          <>
-            <section className="sub-panel">
-              <h3>Current Situation</h3>
-              <p>At {event.time}s, {countPhrase(Object.values(event.state?.aircraft || {}).length, 'aircraft')} {Object.values(event.state?.aircraft || {}).length === 1 ? 'is' : 'are'} in the replay. {describeConflicts(event.conflicts || [], event.predicted_conflicts || [])}</p>
-              <ReadableList title="Why the controller was called" items={(event.decision_points || []).map(describeDecisionPoint)} emptyText="No safety or scheduling issue triggered a controller call on this tick." />
-            </section>
-            <section className="sub-panel">
-              <h3>Controller Action</h3>
-              <ReadableList title="Issued command" items={(event.tick_explanation?.action_chosen || event.actions || []).map(describeAction)} emptyText="The controller issued no command." />
-              {(event.invalid_actions || []).length > 0 && <ReadableList title="Rejected command" items={(event.invalid_actions || []).map(describeInvalidAction)} emptyText="No rejected commands." />}
-            </section>
-            <section className="sub-panel">
-              <h3>Outcome</h3>
-              <span className={`outcome-badge outcome-${event.tick_explanation?.outcome?.kind || 'unknown'}`}>{humanize(event.tick_explanation?.outcome?.kind || 'unknown')}</span>
-              <p>{describeOutcome(event.tick_explanation?.outcome?.kind || 'unknown', Number(event.tick_explanation?.score_after || 0) - Number(event.tick_explanation?.score_before || 0), event.tick_explanation || {})}</p>
-              <ComponentTable explanation={event.tick_explanation || {}} />
-            </section>
-            <TechnicalDetails label="Technical tick JSON" value={{
-              decision_points: event.decision_points,
-              actions: event.actions,
-              invalid_actions: event.invalid_actions,
-              conflicts: event.conflicts,
-              predicted_conflicts: event.predicted_conflicts,
-              triggered_events: event.triggered_events,
-              tick_explanation: event.tick_explanation
-            }} />
-          </>
-        ) : <p className="muted">Load a trace file to see tick details.</p>}
-      </article>
-    </details>
-  );
-}
-
-function TimelinePanel({ state }) {
+function TimelinePanel({ state, embedded = false }) {
   const rows = useMemo(() => {
     const componentTotals = {};
     const filteredRows = [];
@@ -695,9 +665,8 @@ function TimelinePanel({ state }) {
     });
     return filteredRows;
   }, [state.traceEvents, state.filterHurt, state.filterSafety, state.filterLargeDelta]);
-  return (
-    <details className="panel hud-drawer history-drawer">
-      <summary>History</summary>
+  const body = (
+    <>
       <div className="timeline-filters">
         <label title="Show only moments where the controller's action reduced the score.">
           <input type="checkbox" checked={state.filterHurt} onChange={(event) => state.setFilterHurt(event.target.checked)} /> Only hurt ticks
@@ -717,8 +686,12 @@ function TimelinePanel({ state }) {
           const immediateDelta = Number(explanation.outcome?.immediate_delta || 0);
           const totalDelta = Number(explanation.score_after || 0) - Number(explanation.score_before || 0);
           return (
-            <details key={rowKey} className="timeline-item">
-              <summary className="timeline-summary">
+            <DisclosurePanel
+              key={rowKey}
+              className="timeline-item"
+              triggerClassName="timeline-summary"
+              title={(
+                <>
                 <span className="timeline-summary-left">
                   <span>#{index + 1} - {event.time}s</span>
                   <span className={`outcome-badge outcome-${outcomeKind}`}>{humanize(outcomeKind)}</span>
@@ -726,7 +699,9 @@ function TimelinePanel({ state }) {
                   <span>{summarizeAction(explanation.action_chosen || event.actions || [])}</span>
                 </span>
                 <span className="timeline-summary-right">{scoreImpactLabel(totalDelta, immediateDelta)}</span>
-              </summary>
+                </>
+              )}
+            >
               <div className="timeline-body">
                 <p>{describeOutcome(outcomeKind, totalDelta, explanation)}</p>
                 <ComponentTable explanation={explanation} componentTotals={totals} />
@@ -734,20 +709,115 @@ function TimelinePanel({ state }) {
                   <button className="jump-link" type="button" onClick={() => state.setCurrentTickIndex?.(index)}>Jump to this moment</button>
                 </div>
               </div>
-            </details>
+            </DisclosurePanel>
           );
         })}
       </div>
-    </details>
+    </>
+  );
+  if (embedded) {
+    return <section className="panel replay-sidebar-panel history-drawer">{body}</section>;
+  }
+  return (
+    <DisclosurePanel className="panel hud-drawer history-drawer" title="History" contentClassName="hud-drawer-body">
+      {body}
+    </DisclosurePanel>
   );
 }
 
-function BottomHud({ state, event }) {
+function BottomHud({ state }) {
   return (
     <section className="bottom-hud" aria-label="Replay bottom HUD">
-      <TimelinePanel state={state} />
       <ReplayControls state={state} />
-      <TickPanel event={event} />
+    </section>
+  );
+}
+
+function ReplayInfoPanel({ state }) {
+  return (
+    <section className="replay-info-panel" aria-label="Replay setup and summary">
+      <SectionHeading eyebrow="Replay" title="Scenario" />
+      <FileControls state={state} />
+      <ScenarioSummary state={state} />
+      <ScorePanel score={state.score} />
+    </section>
+  );
+}
+
+function ReplaySidebar({ state, event }) {
+  const [activeTab, setActiveTab] = useState('history');
+  return (
+    <aside className="replay-sidebar" aria-label="Replay detail sidebar">
+      <ReplayInfoPanel state={state} />
+      <div className="replay-detail-section">
+        <div className="replay-sidebar-tabs" role="tablist" aria-label="Replay sidebar">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'history'}
+            aria-controls="replayHistoryPanel"
+            id="replayHistoryTab"
+            onClick={() => setActiveTab('history')}
+          >
+            History
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'tick'}
+            aria-controls="replayTickPanel"
+            id="replayTickTab"
+            onClick={() => setActiveTab('tick')}
+          >
+            Tick
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'aircraft'}
+            aria-controls="replayAircraftPanel"
+            id="replayAircraftTab"
+            onClick={() => setActiveTab('aircraft')}
+          >
+            Aircraft
+          </button>
+        </div>
+        <div className="replay-sidebar-body">
+          {activeTab === 'history' && (
+            <div id="replayHistoryPanel" role="tabpanel" aria-labelledby="replayHistoryTab">
+              <TimelinePanel state={state} embedded />
+            </div>
+          )}
+          {activeTab === 'tick' && (
+            <div id="replayTickPanel" role="tabpanel" aria-labelledby="replayTickTab">
+              <TickPanel event={event} embedded />
+            </div>
+          )}
+          {activeTab === 'aircraft' && (
+            <div id="replayAircraftPanel" role="tabpanel" aria-labelledby="replayAircraftTab">
+              <AircraftPanel event={event} selectedCallsign={state.selectedCallsign} />
+            </div>
+          )}
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function LiveLayout({ state, event }) {
+  return (
+    <section className="live-overlay-layer workspace-overlay" aria-label="Live mode workspace">
+      <LiveSessionControls state={state} />
+      <LiveDashboard state={state} event={event} />
+      <LiveRadarControls state={state} />
+    </section>
+  );
+}
+
+function ReplayLayout({ state, event }) {
+  return (
+    <section className="replay-overlay-layer workspace-overlay" aria-label="Replay mode workspace">
+      <ReplaySidebar state={state} event={event} />
     </section>
   );
 }
@@ -755,14 +825,17 @@ function BottomHud({ state, event }) {
 export default function App() {
   const state = useViewerState();
   const event = state.traceEvents[state.currentTickIndex];
+  const isLive = state.currentMode === 'live';
   return (
-    <main className={state.currentMode === 'live' ? 'live-mode' : ''}>
+    <main className={`app-shell ${isLive ? 'live-mode mode-live' : 'mode-replay'}`}>
       <Header state={state} />
-      <LiveSessionControls state={state} />
-      <LiveControlPanel state={state} />
-      <LiveDashboard state={state} event={event} />
-      <ReplayLayout state={state} event={event} />
-      <BottomHud state={state} event={event} />
+      <section className="workspace-container" aria-label={isLive ? 'Live radar workspace' : 'Replay radar workspace'}>
+        <div className="radar-stage-canvas">
+          <RadarPanel state={state} />
+        </div>
+        {isLive ? <LiveLayout state={state} event={event} /> : <ReplayLayout state={state} event={event} />}
+      </section>
+      {!isLive && <BottomHud state={state} />}
     </main>
   );
 }

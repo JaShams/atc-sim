@@ -79,47 +79,49 @@ test.describe('live mode viewer controls', () => {
       window.atcLiveEndpoint = `ws://127.0.0.1:${port}/live`;
     }, livePort);
 
-    await page.getByLabel('Mode', { exact: true }).selectOption('live');
+    await page.getByRole('switch', { name: 'Live mode' }).check();
+    await expect(page.getByRole('button', { name: 'Start' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Disconnect' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Pause' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Reset' })).toHaveCount(0);
     await page.getByRole('button', { name: 'Start' }).click();
 
     await expect(page.getByRole('status').first()).toContainText('Live connected');
     await expect(page.getByLabel('Live game dashboard')).toBeVisible();
     await expect(page.locator('.live-run-state')).toContainText('Running');
-    await expect(page.getByLabel('Time')).toBeEnabled();
-    await expect.poll(async () => Number(await page.getByLabel('Time').getAttribute('max'))).toBeGreaterThan(0);
-    await expect.poll(async () => page.locator('.flight-strip').count()).toBeGreaterThan(0);
-
-    await page.locator('.flight-strip').first().click();
-    await expect(page.locator('.flight-strip.selected .strip-selector')).toContainText('Selected');
+    await expect(page.getByRole('button', { name: 'Start' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Disconnect' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Reset' })).toHaveCount(0);
+    await expect(page.getByLabel('Time')).toHaveCount(0);
+    await expect(page.locator('.flight-strip')).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Set scope to 80 nautical miles' }).click();
     await page.getByRole('button', { name: 'Set scope to 40 nautical miles' }).click();
 
-    const callsign = (await page.locator('.flight-strip.selected .strip-title b').textContent()).trim();
-    await page.getByLabel('Command text').fill(`${callsign} HDG 090`);
+    await page.getByLabel('Command text').fill('ARR1 HDG 090');
     await page.getByRole('button', { name: 'Send' }).click();
     await expect(page.locator('.command-feedback')).toContainText(/Accepted|Rejected/);
+    await page.getByRole('tab', { name: 'Log' }).click();
     await expect(page.locator('.live-event-log')).toContainText(/Accepted|Rejected/);
 
     await page.getByRole('button', { name: 'Pause' }).click();
     await expect(page.getByRole('button', { name: 'Resume' })).toBeVisible();
     await expect(page.locator('.live-run-state')).toContainText(/Paused/);
-    const pausedMax = await page.getByLabel('Time').getAttribute('max');
     await page.waitForTimeout(450);
-    await expect(page.getByLabel('Time')).toHaveAttribute('max', pausedMax);
 
     await page.getByRole('button', { name: 'Resume' }).click();
     await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible();
     await expect(page.locator('.live-run-state')).toContainText(/Running/);
-    await expect.poll(async () => Number(await page.getByLabel('Time').getAttribute('max'))).toBeGreaterThan(Number(pausedMax));
 
+    page.once('dialog', (dialog) => dialog.accept());
+    await page.getByRole('button', { name: 'More' }).click();
     await page.getByRole('button', { name: 'Reset' }).click();
     await expect(page.locator('.live-event-log')).toContainText(/reset/i);
-    await expect.poll(async () => Number(await page.getByLabel('Time').inputValue())).toBeLessThanOrEqual(1);
 
     await page.getByRole('button', { name: 'Disconnect' }).click();
     await expect(page.getByRole('button', { name: 'Start' })).toBeEnabled();
-    await expect(page.getByRole('button', { name: 'Disconnect' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Disconnect' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Send' })).toBeDisabled();
   });
 });
