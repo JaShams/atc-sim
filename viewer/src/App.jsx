@@ -1,6 +1,174 @@
+import { useId, useMemo } from 'react';
 import RadarStage from './RadarStage.jsx';
+import useViewerState, {
+  countPhrase,
+  describeAction,
+  describeDecisionPoint,
+  describeInvalidAction,
+  formatNum,
+  formatSigned,
+  humanize,
+  humanizeLabel,
+  isSafetyTriggeredCall,
+  prettifyScenarioName
+} from './useViewerState.js';
 
-function Header() {
+const COMMAND_ACTIONS = [
+  ['no_op', 'No action'],
+  ['assign_heading', 'Heading'],
+  ['assign_altitude', 'Altitude'],
+  ['assign_speed', 'Speed'],
+  ['clear_to_land', 'Land'],
+  ['clear_for_takeoff', 'Takeoff'],
+  ['go_around', 'Go around'],
+  ['hold_short', 'Hold short'],
+  ['hold_position', 'Hold position']
+];
+
+function aircraftSetFromRecords(records = []) {
+  return new Set(records.flatMap((record) => (Array.isArray(record.aircraft) ? record.aircraft : [record.a, record.b].filter(Boolean))));
+}
+
+function describeScenario(state, aircraft, metadata, stressors) {
+  if (!aircraft.length) return 'This replay has no aircraft in the first tick, so only file-level details can be shown.';
+  const arrivals = aircraft.filter((ac) => ac.role === 'arrival').length;
+  const departures = aircraft.filter((ac) => ac.role === 'departure').length;
+  const emergencies = aircraft.filter((ac) => ac.emergency).length;
+  const runway = state.airport?.active_runway || state.airport?.runway_id || 'the active runway';
+  const queue = state.airport?.departure_queue || [];
+  const parts = [`This scenario starts with ${countPhrase(arrivals, 'arrival')} and ${countPhrase(departures, 'departure')} around runway ${runway}.`];
+  if (queue.length) parts.push(`${queue.length === 1 ? queue[0] : `${queue.length} aircraft`} ${queue.length === 1 ? 'is' : 'are'} waiting to depart.`);
+  if (emergencies) parts.push(`${countPhrase(emergencies, 'aircraft')} ${emergencies === 1 ? 'has' : 'have'} an emergency.`);
+  if (stressors.length) parts.push(`The main challenge is ${stressors.map(humanize).join(', ')}.`);
+  else if (metadata?.tags?.length) parts.push(`The focus is ${metadata.tags.map(humanize).join(', ')}.`);
+  return parts.join(' ');
+}
+
+function describeConflicts(conflicts, predicted) {
+  if (conflicts.length) return `${countPhrase(conflicts.length, 'active conflict')} needs immediate attention.`;
+  if (predicted.length) return `${countPhrase(predicted.length, 'predicted conflict')} may need attention soon.`;
+  return 'No aircraft conflict is detected on this tick.';
+}
+
+function describeOutcome(kind, totalDelta, explanation) {
+  const before = explanation.score_before;
+  const after = explanation.score_after;
+  const scoreText = typeof before === 'number' && typeof after === 'number'
+    ? ` The score moved from ${formatNum(before)} to ${formatNum(after)}.`
+    : '';
+  if (kind === 'helped') return `The action helped the run on this tick (${formatSigned(totalDelta)} points).${scoreText}`;
+  if (kind === 'hurt') return `The action hurt the run on this tick (${formatSigned(totalDelta)} points).${scoreText}`;
+  if (kind === 'neutral') return `The action did not materially change the score on this tick.${scoreText}`;
+  return `The outcome was not classified for this tick.${scoreText}`;
+}
+
+function primaryReason(event) {
+  const points = event.decision_points || [];
+  if (points.length) return describeDecisionPoint(points[0]);
+  const triggered = event.triggered_events || [];
+  if (triggered.length) return humanizeLabel(triggered[0].type || 'Triggered event');
+  return 'Routine replay tick';
+}
+
+function scoreImpactLabel(totalDelta, immediateDelta) {
+  if (totalDelta === 0 && immediateDelta === 0) return 'No score change';
+  return `${formatSigned(totalDelta)} pts - norm ${formatSigned(immediateDelta)}`;
+}
+
+function summarizeAction(actions) {
+  if (!Array.isArray(actions) || !actions.length) return 'No action';
+  return actions.map(describeAction).join('; ');
+}
+
+function buildLiveObjectiveCopy(aircraft, runway, emergencies) {
+  const arrivals = aircraft.filter((ac) => ac.role === 'arrival').length;
+  const departures = aircraft.filter((ac) => ac.role === 'departure').length;
+  const parts = [`Sequence ${countPhrase(arrivals, 'arrival')} and ${countPhrase(departures, 'departure')} around runway ${runway}.`];
+  if (emergencies) parts.push(`Prioritize ${countPhrase(emergencies, 'emergency aircraft')}.`);
+  parts.push('Keep separation, protect the runway, and issue clearances from the aircraft strips or command panel.');
+  return parts.join(' ');
+}
+
+function Stat({ label, value, help }) {
+  return (
+    <div className="stat" title={help}>
+      <span>{label}</span>
+      <b>{value}</b>
+    </div>
+  );
+}
+
+function SectionHeading({ eyebrow, title }) {
+  return (
+    <div className="section-heading">
+      <div>
+        <p className="eyebrow">{eyebrow}</p>
+        <h2>{title}</h2>
+      </div>
+    </div>
+  );
+}
+
+function TechnicalDetails({ label, value }) {
+  return (
+    <details className="technical-details">
+      <summary>{label}</summary>
+      <pre>{JSON.stringify(value || {}, null, 2)}</pre>
+    </details>
+  );
+}
+
+function ReadableList({ title, items, emptyText }) {
+  return (
+    <>
+      <h4>{title}</h4>
+      {items.length ? (
+        <ul>{items.map((item) => <li key={item}>{item}</li>)}</ul>
+      ) : (
+        <p className="muted">{emptyText}</p>
+      )}
+    </>
+  );
+}
+
+function ComponentTable({ explanation, componentTotals = {} }) {
+  const scoreBefore = Number(explanation.score_before || 0);
+  const scoreAfter = Number(explanation.score_after || 0);
+  const totalDelta = scoreAfter - scoreBefore;
+  const nonZeroComponents = Object.entries(explanation.score_delta_by_component || {}).filter(([, delta]) => Number(delta) !== 0);
+  if (!nonZeroComponents.length) return <p className="muted">No component-level score changes on this tick.</p>;
+  return (
+    <table className="component-table">
+      <thead>
+        <tr>
+          <th>What changed</th>
+          <th>Before</th>
+          <th>After</th>
+          <th>Delta</th>
+          <th>Share</th>
+        </tr>
+      </thead>
+      <tbody>
+        {nonZeroComponents.map(([component, delta]) => {
+          const deltaNum = Number(delta || 0);
+          const before = Number(componentTotals[component] || 0);
+          const pct = totalDelta === 0 ? 0 : (deltaNum / totalDelta) * 100;
+          return (
+            <tr key={component}>
+              <td>{humanizeLabel(component)}</td>
+              <td>{formatNum(before)}</td>
+              <td>{formatNum(before + deltaNum)}</td>
+              <td>{formatSigned(deltaNum)}</td>
+              <td>{formatNum(pct)}%</td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+function Header({ state }) {
   return (
     <header className="app-header">
       <details className="hud-primary top-hud-drawer" open>
@@ -11,144 +179,330 @@ function Header() {
           </div>
         </summary>
         <div className="hud-inline">
-          <ModeControls />
-          <FileControls />
-          <ScenarioSummary />
-          <article className="panel hud-score-panel" id="scorePanel"></article>
+          <ModeControls state={state} />
+          <FileControls state={state} />
+          <ScenarioSummary state={state} />
+          <ScorePanel score={state.score} />
         </div>
       </details>
-      <div id="loadStatus" className="status-pill" role="status">
-        Load a trace file to begin. Score file optional.
-      </div>
+      <div className="status-pill load-status" role="status">{state.loadStatus}</div>
     </header>
   );
 }
 
-function ModeControls() {
+function ModeControls({ state }) {
   return (
     <section className="panel controls mode-controls" aria-label="Viewer mode">
-      <label htmlFor="modeSelect">Mode</label>
-      <select id="modeSelect" defaultValue="replay">
-        <option value="replay">Replay mode</option>
-        <option value="live">Live mode</option>
-      </select>
-      <span id="modeStatus" className="muted">
-        Replay mode loads files from disk.
+      <label>
+        <span>Mode</span>
+        <select aria-label="Mode" value={state.currentMode} onChange={(event) => state.handleModeChange(event.target.value)}>
+          <option value="replay">Replay mode</option>
+          <option value="live">Live mode</option>
+        </select>
+      </label>
+      <span className="muted">
+        {state.currentMode === 'live' ? 'Live mode streams ticks from the backend.' : 'Replay mode loads files from disk.'}
       </span>
     </section>
   );
 }
 
-function LiveSessionControls() {
+function FileControls({ state }) {
   return (
-    <section className="live-session-card live-session-header" id="liveSessionControls" aria-label="Live session controls" hidden>
+    <section className="panel controls file-controls" aria-label="Load replay files">
+      <label className="file-picker">
+        Trace JSONL
+        <input aria-label="Trace JSONL" type="file" accept=".jsonl,.txt,application/json" onChange={(event) => state.loadTraceFile(event.target.files?.[0])} />
+      </label>
+      <label className="file-picker">
+        Score JSON
+        <input aria-label="Score JSON" type="file" accept=".json,application/json" onChange={(event) => state.loadScoreFile(event.target.files?.[0])} />
+      </label>
+    </section>
+  );
+}
+
+function ScenarioSummary({ state }) {
+  const first = state.traceEvents[0] || {};
+  const last = state.traceEvents[state.traceEvents.length - 1] || {};
+  const firstState = first.state || first.observation?.snapshot || {};
+  const aircraft = Object.values(firstState.aircraft || {});
+  const manifest = state.score?.run_manifest || {};
+  const metadata = manifest.scenario_metadata || {};
+  const scenarioName = prettifyScenarioName(manifest.scenario_file || 'Loaded replay');
+  const agentName = manifest.agent_name ? humanize(manifest.agent_name) : 'Unknown agent';
+  const runway = firstState.airport?.active_runway || firstState.airport?.runway_id || 'unknown runway';
+  const duration = typeof last.time === 'number' ? `${last.time}s` : `${Math.max(0, state.traceEvents.length - 1)} ticks`;
+  const tags = Array.isArray(metadata.tags) ? metadata.tags : [];
+  const stressors = Array.isArray(metadata.intended_stressors) ? metadata.intended_stressors : [];
+
+  if (!state.traceEvents.length) {
+    return (
+      <section className="summary-band scenario-summary" aria-label="Scenario summary">
+        <div>
+          <p className="eyebrow">Scenario</p>
+          <h2>No replay loaded</h2>
+          <p className="summary-copy">Choose a trace JSONL file to see a plain-language summary of the aircraft, runway, and main safety challenge.</p>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="summary-band scenario-summary" aria-label="Scenario summary">
+      <div>
+        <p className="eyebrow">Scenario</p>
+        <h2>{scenarioName}</h2>
+        <p className="summary-copy">{describeScenario(firstState, aircraft, metadata, stressors)}</p>
+      </div>
+      <div className="summary-stats">
+        <Stat label="Agent" value={agentName} help="The controller logic that produced these actions." />
+        <Stat label="Score" value={state.score ? formatNum(state.score.score) : 'No score loaded'} help="Higher is better for this benchmark run." />
+        <Stat label="Difficulty" value={metadata.difficulty_tier ? humanize(metadata.difficulty_tier) : 'Unknown'} help="Scenario complexity label from the benchmark metadata." />
+        <Stat label="Aircraft" value={String(aircraft.length)} help="Aircraft present at the start of the replay." />
+        <Stat label="Runway" value={runway} help="The active runway at the start of the replay." />
+        <Stat label="Duration" value={duration} help="Replay time covered by the loaded trace." />
+      </div>
+      {[...tags, ...stressors].length > 0 && (
+        <div className="chip-row">
+          {[...tags, ...stressors].slice(0, 6).map((tag) => <span key={tag} className="chip">{humanize(tag)}</span>)}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ScorePanel({ score }) {
+  if (!score) {
+    return (
+      <article className="panel hud-score-panel score-panel">
+        <SectionHeading eyebrow="Run Result" title="Score" />
+        <p className="muted">No score file loaded. The replay still works, but score explanations and run metadata are limited.</p>
+      </article>
+    );
+  }
+  const metrics = [
+    ['Active conflicts', score.metrics?.active_conflicts_count_total ?? score.safety?.loss_of_separation ?? 0, 'Times aircraft were too close during the replay.'],
+    ['Predicted conflicts', score.metrics?.predicted_conflicts_count_total ?? 0, 'Future conflicts detected by the simulator.'],
+    ['Invalid commands', score.control_quality?.invalid_commands ?? score.metrics?.malformed_agent_outputs_count ?? 0, 'Commands rejected by the simulator rules.'],
+    ['Throughput/hr', formatNum(score.metrics?.throughput_ops_per_hour ?? 0), 'Landings and departures completed per simulated hour.']
+  ];
+  const breakdown = Object.entries(score.score_breakdown || {}).filter(([, value]) => Number(value) !== 0);
+  return (
+    <article className="panel hud-score-panel score-panel">
+      <SectionHeading eyebrow="Run Result" title="Score" />
+      <div className="score-hero">
+        <span>Total score</span>
+        <b>{formatNum(score.score)}</b>
+      </div>
+      <div className="mini-stat-grid">
+        {metrics.map(([label, value, help]) => <Stat key={label} label={label} value={String(value)} help={help} />)}
+      </div>
+      {breakdown.length > 0 && (
+        <>
+          <h3>What changed the score</h3>
+          <ul>
+            {breakdown.map(([key, value]) => (
+              <li key={key}><b>{humanizeLabel(key)}</b>: {formatSigned(Number(value))}</li>
+            ))}
+          </ul>
+        </>
+      )}
+      <TechnicalDetails label="Technical score JSON" value={score} />
+    </article>
+  );
+}
+
+function LiveSessionControls({ state }) {
+  const isLive = state.currentMode === 'live';
+  const connected = state.liveConnectionState;
+  if (!isLive) return null;
+  return (
+    <section className="live-session-card live-session-header" aria-label="Live session controls">
       <div className="live-button-row">
-        <button id="liveConnect" type="button">Start</button>
-        <button id="liveDisconnect" type="button" disabled>Disconnect</button>
-        <button id="livePause" type="button" disabled>Pause</button>
-        <button id="liveReset" type="button" disabled>Reset</button>
-        <button id="liveEnd" type="button" disabled>End</button>
+        <button type="button" onClick={state.connectLiveTransport} disabled={connected}>Start</button>
+        <button type="button" onClick={state.disconnectLiveTransport} disabled={!connected}>Disconnect</button>
+        <button type="button" onClick={() => state.sendLiveControl(state.livePaused ? 'resume' : 'pause')} disabled={!connected}>
+          {state.livePaused ? 'Resume' : 'Pause'}
+        </button>
+        <button type="button" onClick={() => state.sendLiveControl('reset')} disabled={!connected}>Reset</button>
+        <button type="button" onClick={() => state.sendLiveControl('end_session')} disabled={!connected}>End</button>
       </div>
     </section>
   );
 }
 
-function FileControls() {
+function LiveControlPanel({ state }) {
+  if (state.currentMode !== 'live') return null;
   return (
-    <section className="panel controls file-controls" aria-label="Load replay files">
-      <label className="file-picker">
-        Trace JSONL <input id="traceFile" type="file" accept=".jsonl,.txt,application/json" />
-      </label>
-      <label className="file-picker">
-        Score JSON <input id="scoreFile" type="file" accept=".json,application/json" />
-      </label>
-    </section>
-  );
-}
-
-function LiveControlPanel() {
-  return (
-    <section className="live-control-panel overlay-panel" id="livePanel" aria-label="Live controller panel" hidden>
+    <section className="live-control-panel overlay-panel" aria-label="Live controller panel">
       <div className="live-command-grid">
         <article className="live-command-card">
           <div className="live-panel-title">
             <p className="eyebrow">Clearance</p>
             <h2>Command</h2>
           </div>
-          <div className="live-command-fields">
-            <input id="commandType" type="hidden" defaultValue="no_op" />
-            <input id="commandText" type="text" autoComplete="off" spellCheck="false" placeholder="ARR1 HDG 090" />
-            <input id="commandValue" type="number" step="1" hidden />
-            <button id="sendCommand" type="button" disabled>Send</button>
+          <div className="command-button-grid" aria-label="Command shortcuts">
+            {COMMAND_ACTIONS.map(([type, label]) => (
+              <button
+                key={type}
+                type="button"
+                className={`command-action ${state.commandType === type ? 'selected' : ''}`}
+                onClick={() => state.selectCommandType(type)}
+              >
+                {label}
+              </button>
+            ))}
           </div>
-          <p id="commandHint" className="muted command-hint">Type commands like ARR1 HDG 090, ARR2 LAND, or DEP1 TAKEOFF.</p>
-          <p id="commandFeedback" className="command-feedback" role="status" aria-live="polite"></p>
+          <div className="live-command-fields">
+            <input
+              className="command-text-input"
+              aria-label="Command text"
+              type="text"
+              autoComplete="off"
+              spellCheck="false"
+              placeholder="ARR1 HDG 090"
+              value={state.commandText}
+              onChange={(event) => state.handleCommandTextChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') state.sendLiveCommand();
+              }}
+            />
+            <button className="send-command" type="button" onClick={state.sendLiveCommand} disabled={!state.liveConnectionState}>Send</button>
+          </div>
+          <p className="muted command-hint">Type commands like ARR1 HDG 090, ARR2 LAND, or DEP1 TAKEOFF.</p>
+          <p className={`command-feedback ${state.commandFeedback.status || ''}`} role="status" aria-live="polite">
+            {state.commandFeedback.message}
+          </p>
         </article>
       </div>
     </section>
   );
 }
 
-function LiveDashboard() {
+function LiveDashboard({ state, event }) {
+  if (state.currentMode !== 'live') return null;
+  const hasState = Boolean(event?.state);
+  const aircraft = Object.values(event?.state?.aircraft || {});
+  const conflicts = event?.conflicts || [];
+  const predicted = event?.predicted_conflicts || [];
+  const airport = event?.state?.airport || {};
+  const runway = airport.active_runway || airport.runway_id || 'unknown';
+  const completed = aircraft.filter((ac) => ac.status === 'landed' || ac.status === 'exited_airspace').length;
+  const emergencies = aircraft.filter((ac) => ac.emergency).length;
+  const runwayStatus = airport.runway_occupied_by ? `${runway} occupied by ${airport.runway_occupied_by}` : `${runway} clear`;
   return (
-    <section className="live-game-layout" id="liveGamePanel" aria-label="Live game dashboard" hidden>
+    <section className="live-game-layout" aria-label="Live game dashboard">
       <article className="panel live-status-card">
         <div className="section-heading">
           <div>
             <p className="eyebrow">Objective</p>
-            <h2 id="liveObjectiveTitle">Start a live session</h2>
+            <h2>{hasState ? `${runway} control` : 'Start a live session'}</h2>
           </div>
-          <span id="liveRunState" className="status-pill">Disconnected</span>
+          <span className="status-pill live-run-state">{state.liveRunState}</span>
         </div>
-        <p id="liveObjectiveCopy" className="summary-copy">Start live mode to control traffic in real time.</p>
-        <div id="liveStats" className="live-stat-grid"></div>
-      </article>
-      <article className="panel live-alert-card">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Alerts</p>
-            <h2>Controller Queue</h2>
-          </div>
+        <p className="summary-copy">{hasState ? buildLiveObjectiveCopy(aircraft, runway, emergencies) : 'Start live mode to control traffic in real time.'}</p>
+        <div className="live-stat-grid">
+          {hasState ? (
+            <>
+              <Stat label="Clock" value={`${event.time}s`} help="Current simulation clock." />
+              <Stat label="Aircraft" value={String(aircraft.length)} help="Tracked aircraft in the live session." />
+              <Stat label="Completed" value={String(completed)} help="Aircraft landed or exited airspace." />
+              <Stat label="Conflicts" value={String(conflicts.length)} help="Active aircraft separation conflicts." />
+              <Stat label="Predicted" value={String(predicted.length)} help="Projected conflicts in the lookahead window." />
+              <Stat label="Runway" value={runwayStatus} help="Current runway state." />
+            </>
+          ) : (
+            <>
+              <Stat label="Clock" value="0s" help="Current simulation clock." />
+              <Stat label="Aircraft" value="0" help="Tracked aircraft in the live session." />
+              <Stat label="Conflicts" value="0" help="Active aircraft separation conflicts." />
+              <Stat label="Runway" value="-" help="Current runway state." />
+            </>
+          )}
         </div>
-        <div id="liveAlerts" className="live-alert-list"></div>
       </article>
-      <article className="panel live-strip-card">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Aircraft</p>
-            <h2>Flight Strips</h2>
-          </div>
-        </div>
-        <div id="liveStrips" className="flight-strip-list"></div>
-      </article>
-      <article className="panel live-log-card">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Log</p>
-            <h2>Recent Events</h2>
-          </div>
-        </div>
-        <div id="liveEventLog" className="live-event-log"></div>
-      </article>
+      <LiveAlerts event={event} emergencies={emergencies} />
+      <FlightStrips state={state} event={event} aircraft={aircraft} />
+      <LiveEventLog entries={state.liveLogEntries} />
     </section>
   );
 }
 
-function ScenarioSummary() {
+function LiveAlerts({ event, emergencies }) {
+  const alerts = [];
+  (event?.conflicts || []).forEach((conflict) => {
+    const aircraft = conflict.aircraft || [];
+    alerts.push({ key: `active-conflict-${aircraft.join('-')}`, level: 'critical', text: `Active conflict: ${aircraft.join(', ')}` });
+  });
+  (event?.predicted_conflicts || []).forEach((conflict) => {
+    const aircraft = conflict.aircraft || [];
+    alerts.push({ key: `predicted-conflict-${aircraft.join('-')}`, level: 'warn', text: `Predicted conflict: ${aircraft.join(', ')}` });
+  });
+  (event?.decision_points || []).forEach((point) => {
+    const aircraft = Array.isArray(point.aircraft) ? point.aircraft.join('-') : 'none';
+    alerts.push({ key: `decision-${point.type || 'unknown'}-${point.severity || 'info'}-${aircraft}`, level: point.severity || 'info', text: describeDecisionPoint(point) });
+  });
+  if (emergencies) alerts.push({ key: 'emergency-priority', level: 'critical', text: `${countPhrase(emergencies, 'emergency aircraft')} require priority.` });
   return (
-    <section className="summary-band" id="scenarioSummary" aria-label="Scenario summary">
-      <div>
-        <p className="eyebrow">Scenario</p>
-        <h2>No replay loaded</h2>
-        <p className="summary-copy">
-          Choose a trace JSONL file to see a plain-language summary of the aircraft, runway, and main safety challenge.
-        </p>
+    <article className="panel live-alert-card">
+      <SectionHeading eyebrow="Alerts" title="Controller Queue" />
+      <div className="live-alert-list">
+        {alerts.length ? alerts.slice(0, 8).map((alert) => (
+          <div key={alert.key} className={`live-alert live-alert-${String(alert.level).toLowerCase()}`}>{alert.text}</div>
+        )) : <p className="muted">No active controller alerts.</p>}
       </div>
-    </section>
+    </article>
   );
 }
 
-function RadarPanel() {
+function FlightStrips({ state, event, aircraft }) {
+  const conflictSet = aircraftSetFromRecords(event?.conflicts || []);
+  const predictedSet = aircraftSetFromRecords(event?.predicted_conflicts || []);
+  return (
+    <article className="panel live-strip-card">
+      <SectionHeading eyebrow="Aircraft" title="Flight Strips" />
+      <div className="flight-strip-list">
+        {aircraft.length ? aircraft.map((ac) => {
+          const selected = state.selectedCallsign === ac.callsign;
+          const roleClass = String(ac.role || '').toLowerCase();
+          const alertClass = conflictSet.has(ac.callsign) ? 'critical' : predictedSet.has(ac.callsign) || ac.emergency ? 'warn' : '';
+          return (
+            <button
+              key={ac.callsign}
+              type="button"
+              className={`flight-strip ${roleClass} ${selected ? 'selected' : ''} ${alertClass}`.trim()}
+              onClick={() => state.selectAircraftForCommand(selected ? null : ac.callsign)}
+            >
+              <span className="strip-title"><b>{ac.callsign}</b><span>{humanize(ac.role || 'aircraft')}</span></span>
+              <span className="strip-state">{Math.round(ac.altitude_ft)} ft | {Math.round(ac.speed_kt)} kt | HDG {Math.round(ac.heading_deg)}</span>
+              <span className="strip-clearance">{ac.clearance ? humanize(ac.clearance) : humanize(ac.status || 'airborne')}</span>
+              <span className="strip-selector">{selected ? 'Selected' : 'Select'}</span>
+            </button>
+          );
+        }) : <p className="muted">Flight strips appear after the first tick.</p>}
+      </div>
+    </article>
+  );
+}
+
+function LiveEventLog({ entries }) {
+  return (
+    <article className="panel live-log-card">
+      <SectionHeading eyebrow="Log" title="Recent Events" />
+      <div className="live-event-log">
+        {entries.length ? entries.map((entry) => (
+          <div key={entry.id} className="live-log-row">
+            <span>{entry.time}</span>
+            <b>{entry.message}</b>
+          </div>
+        )) : <p className="muted">No live events yet.</p>}
+      </div>
+    </article>
+  );
+}
+
+function RadarPanel({ state }) {
   return (
     <article className="panel radar-panel">
       <div className="section-heading radar-heading">
@@ -158,36 +512,70 @@ function RadarPanel() {
         </div>
       </div>
       <div className="radar-wrap">
-        <RadarStage />
-        <canvas id="radar" className="legacy-radar-canvas" width="900" height="560" aria-label="Radar replay canvas"></canvas>
-        <div id="radarTooltip" className="radar-tooltip" hidden></div>
+        <RadarStage
+          traceEvents={state.traceEvents}
+          currentTickIndex={state.currentTickIndex}
+          selectedCallsign={state.selectedCallsign}
+          hoveredCallsign={state.hoveredCallsign}
+          setHoveredCallsign={state.setHoveredCallsign}
+          selectAircraftForCommand={state.selectAircraftForCommand}
+          showPredictionOverlay={state.showPredictionOverlay}
+          currentMode={state.currentMode}
+          radarScopeRangeNm={state.radarScopeRangeNm}
+          radarView={state.radarView}
+          setRadarView={state.setRadarView}
+          radarBounds={state.radarBounds}
+          liveSnapshotsByCallsign={state.liveSnapshotsByCallsign}
+          latestLiveArrivalMs={state.latestLiveArrivalMs}
+        />
       </div>
       <div className="radar-meta overlay-panel">
-        <div id="radarLegend" className="radar-legend" aria-label="Radar legend"></div>
+        <div className="radar-legend" aria-label="Radar legend"></div>
         <label className="legend-toggle" title="Show 1-3 minute projected path for the selected aircraft.">
-          <input id="togglePrediction" type="checkbox" defaultChecked /> Show prediction overlay
+          <input type="checkbox" checked={state.showPredictionOverlay} onChange={(event) => state.setShowPredictionOverlay(event.target.checked)} /> Show prediction overlay
         </label>
       </div>
     </article>
   );
 }
 
-function ReplayControls() {
+function ReplayControls({ state }) {
+  const sliderId = useId();
+  const speedId = useId();
+  const hasTrace = state.traceEvents.length > 0;
+  const maxTick = Math.max(0, state.traceEvents.length - 1);
+  const tickLabel = hasTrace
+    ? `${state.currentTickIndex + 1} / ${state.traceEvents.length} - t=${state.traceEvents[state.currentTickIndex]?.time}s`
+    : '0 / 0';
   return (
     <div className="timeline-row replay-controls overlay-panel" aria-label="Replay controls">
-      <button id="stepBack" className="icon-button playback-control" type="button" disabled aria-label="Previous tick" title="Previous tick">&#9664;</button>
-      <button id="playPause" className="playback-control" type="button" disabled aria-label="Play replay" title="Play replay">Play</button>
-      <button id="stepForward" className="icon-button playback-control" type="button" disabled aria-label="Next tick" title="Next tick">&#9654;</button>
-      <span id="tickLabel" className="tick-readout">0 / 0</span>
-      <label className="playback-control" htmlFor="tickSlider">Time</label>
-      <input id="tickSlider" className="playback-control" type="range" min="0" max="0" defaultValue="0" disabled />
+      <button className="icon-button playback-control" type="button" disabled={!hasTrace} aria-label="Previous tick" title="Previous tick" onClick={() => state.stepTick(-1)}>&#9664;</button>
+      <button className="playback-control" type="button" disabled={!hasTrace} aria-label={state.isPlaying || state.liveFollowTail ? 'Pause replay' : 'Play replay'} title="Play replay" onClick={state.togglePlayback}>
+        {state.isPlaying || (state.currentMode === 'live' && state.liveFollowTail) ? 'Pause' : 'Play'}
+      </button>
+      <button className="icon-button playback-control" type="button" disabled={!hasTrace} aria-label="Next tick" title="Next tick" onClick={() => state.stepTick(1)}>&#9654;</button>
+      <span className="tick-readout">{tickLabel}</span>
+      <label className="playback-control" htmlFor={sliderId}>Time</label>
+      <input
+        id={sliderId}
+        className="tick-slider playback-control"
+        aria-label="Time"
+        type="range"
+        min="0"
+        max={maxTick}
+        value={state.currentTickIndex}
+        disabled={!hasTrace}
+        onChange={(event) => state.setCurrentTickIndex?.(Number(event.target.value))}
+      />
       <div className="scope-controls" aria-label="Radar scope controls">
-        <button id="zoomOut" className="icon-button" type="button" disabled aria-label="Set scope to 40 nautical miles" title="Set scope to 40 nautical miles">40nm</button>
-        <button id="zoomIn" className="icon-button" type="button" disabled aria-label="Set scope to 80 nautical miles" title="Set scope to 80 nautical miles">80nm</button>
-        <button id="resetView" type="button" disabled aria-label="Reset radar view" title="Reset radar view">Reset</button>
+        <button className="icon-button" type="button" disabled={!hasTrace} aria-label="Set scope to 40 nautical miles" title="Set scope to 40 nautical miles" onClick={() => state.handleZoom('out')}>40nm</button>
+        <button className="icon-button" type="button" disabled={!hasTrace} aria-label="Set scope to 80 nautical miles" title="Set scope to 80 nautical miles" onClick={() => state.handleZoom('in')}>80nm</button>
+        <button type="button" disabled={!hasTrace} aria-label={state.currentMode === 'live' ? 'Return to latest live traffic' : 'Reset radar view'} title="Reset radar view" onClick={state.handleResetView}>
+          {state.currentMode === 'live' ? 'Live' : 'Reset'}
+        </button>
       </div>
-      <label className="playback-control" htmlFor="playSpeed">Speed</label>
-      <select id="playSpeed" className="playback-control" title="Replay speed" defaultValue="1000">
+      <label className="playback-control" htmlFor={speedId}>Speed</label>
+      <select id={speedId} className="playback-control" aria-label="Replay speed" title="Replay speed" value={state.playSpeed} onChange={(event) => state.setPlaySpeed(Number(event.target.value))}>
         <option value="1000">1x</option>
         <option value="500">2x</option>
         <option value="250">4x</option>
@@ -196,71 +584,185 @@ function ReplayControls() {
   );
 }
 
-function ReplayLayout() {
+function AircraftPanel({ event, selectedCallsign }) {
+  const ac = selectedCallsign ? event?.state?.aircraft?.[selectedCallsign] : null;
+  let body = <p className="muted">Hover over an aircraft for a quick label, or click one to keep its details here.</p>;
+  if (selectedCallsign && !ac) {
+    body = <p className="muted">The selected aircraft is not present on this tick.</p>;
+  } else if (ac) {
+    const conflictSet = aircraftSetFromRecords(event.conflicts || []);
+    const predictedSet = aircraftSetFromRecords(event.predicted_conflicts || []);
+    const conflictState = conflictSet.has(selectedCallsign) ? 'Active conflict' : predictedSet.has(selectedCallsign) ? 'Predicted conflict' : 'Nominal';
+    const alertClass = conflictSet.has(selectedCallsign) ? 'critical' : predictedSet.has(selectedCallsign) || ac.emergency ? 'warn' : 'nominal';
+    const roleClass = String(ac.role || '').toLowerCase() === 'departure' ? 'departure' : 'arrival';
+    body = (
+      <div className={`aircraft-glance ${roleClass} ${alertClass}`}>
+        <div className="aircraft-glance-head">
+          <div>
+            <b>{ac.callsign}</b>
+            <span>{humanize(ac.role || 'aircraft')} / {humanize(ac.status || 'unknown')}</span>
+          </div>
+          <em>{conflictState}</em>
+        </div>
+        <div className="aircraft-glance-metrics">
+          <span><small>Alt</small><b>{Math.round(ac.altitude_ft)}</b><small>FT</small></span>
+          <span><small>Spd</small><b>{Math.round(ac.speed_kt)}</b><small>KT</small></span>
+          <span><small>Hdg</small><b>{Math.round(ac.heading_deg)}</b><small>DEG</small></span>
+        </div>
+        <div className="aircraft-glance-tags">
+          <span>{ac.clearance ? humanize(ac.clearance) : 'No clearance'}</span>
+          <span>{ac.emergency ? 'Emergency' : 'No emergency'}</span>
+          <span>{conflictState}</span>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <aside className="panel inspector-panel overlay-panel" aria-label="Selected aircraft">
+      <SectionHeading eyebrow="Inspect" title="Aircraft" />
+      {body}
+    </aside>
+  );
+}
+
+function ReplayLayout({ state, event }) {
   return (
     <section className="replay-layout">
-      <RadarPanel />
-      <aside className="panel inspector-panel overlay-panel" id="aircraftPanel" aria-label="Selected aircraft">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Inspect</p>
-            <h2>Aircraft</h2>
-          </div>
-        </div>
-        <p className="muted">Hover over an aircraft for a quick label, or click one to keep its details here.</p>
-      </aside>
+      <RadarPanel state={state} />
+      {state.currentMode !== 'live' && <AircraftPanel event={event} selectedCallsign={state.selectedCallsign} />}
     </section>
   );
 }
 
-function SecondaryPanels() {
+function TickPanel({ event }) {
   return (
     <details className="panel hud-drawer tick-drawer">
       <summary>Current Tick</summary>
-      <article id="tickPanel"></article>
+      <article>
+        <SectionHeading eyebrow="Now" title="Current Tick" />
+        {event ? (
+          <>
+            <section className="sub-panel">
+              <h3>Current Situation</h3>
+              <p>At {event.time}s, {countPhrase(Object.values(event.state?.aircraft || {}).length, 'aircraft')} {Object.values(event.state?.aircraft || {}).length === 1 ? 'is' : 'are'} in the replay. {describeConflicts(event.conflicts || [], event.predicted_conflicts || [])}</p>
+              <ReadableList title="Why the controller was called" items={(event.decision_points || []).map(describeDecisionPoint)} emptyText="No safety or scheduling issue triggered a controller call on this tick." />
+            </section>
+            <section className="sub-panel">
+              <h3>Controller Action</h3>
+              <ReadableList title="Issued command" items={(event.tick_explanation?.action_chosen || event.actions || []).map(describeAction)} emptyText="The controller issued no command." />
+              {(event.invalid_actions || []).length > 0 && <ReadableList title="Rejected command" items={(event.invalid_actions || []).map(describeInvalidAction)} emptyText="No rejected commands." />}
+            </section>
+            <section className="sub-panel">
+              <h3>Outcome</h3>
+              <span className={`outcome-badge outcome-${event.tick_explanation?.outcome?.kind || 'unknown'}`}>{humanize(event.tick_explanation?.outcome?.kind || 'unknown')}</span>
+              <p>{describeOutcome(event.tick_explanation?.outcome?.kind || 'unknown', Number(event.tick_explanation?.score_after || 0) - Number(event.tick_explanation?.score_before || 0), event.tick_explanation || {})}</p>
+              <ComponentTable explanation={event.tick_explanation || {}} />
+            </section>
+            <TechnicalDetails label="Technical tick JSON" value={{
+              decision_points: event.decision_points,
+              actions: event.actions,
+              invalid_actions: event.invalid_actions,
+              conflicts: event.conflicts,
+              predicted_conflicts: event.predicted_conflicts,
+              triggered_events: event.triggered_events,
+              tick_explanation: event.tick_explanation
+            }} />
+          </>
+        ) : <p className="muted">Load a trace file to see tick details.</p>}
+      </article>
     </details>
   );
 }
 
-function TimelinePanel() {
+function TimelinePanel({ state }) {
+  const rows = useMemo(() => {
+    const componentTotals = {};
+    const filteredRows = [];
+    state.traceEvents.forEach((event, index) => {
+      const explanation = event.tick_explanation || {};
+      const previousTotals = { ...componentTotals };
+      for (const [component, delta] of Object.entries(explanation.score_delta_by_component || {})) {
+        componentTotals[component] = Number(componentTotals[component] || 0) + Number(delta || 0);
+      }
+
+      const outcome = explanation.outcome?.kind || 'unknown';
+      const immediateDelta = Number(explanation.outcome?.immediate_delta || 0);
+      if (state.filterHurt && outcome !== 'hurt') return;
+      if (state.filterSafety && !isSafetyTriggeredCall(event, explanation)) return;
+      if (state.filterLargeDelta && Math.abs(immediateDelta) < 0.05) return;
+      const rowKey = `${event.session_id || 'trace'}-${event.tick_id ?? event.time ?? primaryReason(event)}`;
+      filteredRows.push({ event, index, explanation, componentTotals: previousTotals, rowKey });
+    });
+    return filteredRows;
+  }, [state.traceEvents, state.filterHurt, state.filterSafety, state.filterLargeDelta]);
   return (
-    <details className="panel hud-drawer history-drawer" id="timelinePanel">
+    <details className="panel hud-drawer history-drawer">
       <summary>History</summary>
       <div className="timeline-filters">
         <label title="Show only moments where the controller's action reduced the score.">
-          <input type="checkbox" id="filterHurt" /> Only hurt ticks
+          <input type="checkbox" checked={state.filterHurt} onChange={(event) => state.setFilterHurt(event.target.checked)} /> Only hurt ticks
         </label>
         <label title="Show calls caused by conflicts, runway risks, emergencies, or explicit events.">
-          <input type="checkbox" id="filterSafety" /> Only safety-triggered calls
+          <input type="checkbox" checked={state.filterSafety} onChange={(event) => state.setFilterSafety(event.target.checked)} /> Only safety-triggered calls
         </label>
         <label title="Show only moments where the normalized score changed by at least 0.05.">
-          <input type="checkbox" id="filterLargeDelta" /> Only large deltas (|&Delta;| &ge; 0.05)
+          <input type="checkbox" checked={state.filterLargeDelta} onChange={(event) => state.setFilterLargeDelta(event.target.checked)} /> Only large deltas (|&Delta;| &ge; 0.05)
         </label>
       </div>
-      <div id="timelineList" className="timeline-list"></div>
+      <div className="timeline-list">
+        {!state.traceEvents.length && <p className="muted">Load a trace file to see replay events.</p>}
+        {state.traceEvents.length > 0 && !rows.length && <p className="muted">No replay events match the selected filters.</p>}
+        {rows.map(({ event, index, explanation, componentTotals: totals, rowKey }) => {
+          const outcomeKind = explanation.outcome?.kind || 'unknown';
+          const immediateDelta = Number(explanation.outcome?.immediate_delta || 0);
+          const totalDelta = Number(explanation.score_after || 0) - Number(explanation.score_before || 0);
+          return (
+            <details key={rowKey} className="timeline-item">
+              <summary className="timeline-summary">
+                <span className="timeline-summary-left">
+                  <span>#{index + 1} - {event.time}s</span>
+                  <span className={`outcome-badge outcome-${outcomeKind}`}>{humanize(outcomeKind)}</span>
+                  <span>{primaryReason(event)}</span>
+                  <span>{summarizeAction(explanation.action_chosen || event.actions || [])}</span>
+                </span>
+                <span className="timeline-summary-right">{scoreImpactLabel(totalDelta, immediateDelta)}</span>
+              </summary>
+              <div className="timeline-body">
+                <p>{describeOutcome(outcomeKind, totalDelta, explanation)}</p>
+                <ComponentTable explanation={explanation} componentTotals={totals} />
+                <div className="timeline-actions">
+                  <button className="jump-link" type="button" onClick={() => state.setCurrentTickIndex?.(index)}>Jump to this moment</button>
+                </div>
+              </div>
+            </details>
+          );
+        })}
+      </div>
     </details>
   );
 }
 
-function BottomHud() {
+function BottomHud({ state, event }) {
   return (
     <section className="bottom-hud" aria-label="Replay bottom HUD">
-      <TimelinePanel />
-      <ReplayControls />
-      <SecondaryPanels />
+      <TimelinePanel state={state} />
+      <ReplayControls state={state} />
+      <TickPanel event={event} />
     </section>
   );
 }
 
 export default function App() {
+  const state = useViewerState();
+  const event = state.traceEvents[state.currentTickIndex];
   return (
-    <main>
-      <Header />
-      <LiveSessionControls />
-      <LiveControlPanel />
-      <LiveDashboard />
-      <ReplayLayout />
-      <BottomHud />
+    <main className={state.currentMode === 'live' ? 'live-mode' : ''}>
+      <Header state={state} />
+      <LiveSessionControls state={state} />
+      <LiveControlPanel state={state} />
+      <LiveDashboard state={state} event={event} />
+      <ReplayLayout state={state} event={event} />
+      <BottomHud state={state} event={event} />
     </main>
   );
 }

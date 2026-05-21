@@ -1,28 +1,84 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Arrow, Group, Layer, Line, Rect, Stage, Text } from 'react-konva';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Stage, Layer, Rect, Line, Circle, Text, Arrow, Group } from 'react-konva';
+import { humanize, runwayWorldPoints } from './useViewerState';
 
 const palette = {
-  void: '#0b0f12',
-  grid: 'rgba(180, 198, 210, 0.045)',
+  arrival: '#22f4ff',
+  departure: '#ffb23f',
+  normal: '#9fb2bd',
+  emergency: '#ffffff',
+  predicted: '#b6c5cc',
+  conflict: '#ff2f55',
+  landed: '#51606a',
+  runway: 'rgba(222, 234, 240, 0.58)',
   text: '#f4f7f8',
-  muted: '#8ea0aa',
-  conflict: '#ff2f55'
+  mutedText: '#8ea0aa',
+  structure: 'rgba(180, 198, 210, 0.16)',
+  structureStrong: 'rgba(214, 228, 238, 0.28)',
+  void: '#0b0f12',
+  grid: 'rgba(180, 198, 210, 0.045)'
 };
 
-const emptyFrame = {
-  width: 900,
-  height: 560,
-  runway: 'RWY',
-  targets: [],
-  conflicts: [],
-  predictedConflicts: []
+const LIVE_INTERPOLATION = {
+  lagMs: 220,
+  maxFrameDeltaMs: 120,
+  maxHoldMs: 2200
 };
 
-export default function RadarStage() {
+function lerpNumber(a, b, alpha) {
+  const x = Number(a);
+  const y = Number(b);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return Number.isFinite(y) ? y : x;
+  return x + (y - x) * alpha;
+}
+
+function lerpHeading(a, b, alpha) {
+  const from = Number(a);
+  const to = Number(b);
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return Number.isFinite(to) ? to : from;
+  let delta = ((to - from + 540) % 360) - 180;
+  return (from + delta * alpha + 360) % 360;
+}
+
+function formatFlightLevel(altitudeFt) {
+  const altitude = Number(altitudeFt);
+  if (!Number.isFinite(altitude)) return 'FL---';
+  if (altitude >= 18000) return `FL${String(Math.round(altitude / 100)).padStart(3, '0')}`;
+  return `${Math.round(altitude)}FT`;
+}
+
+function project(v, min, max, outMin, outMax) {
+  if (max - min === 0) return (outMin + outMax) / 2;
+  return outMin + ((v - min) / (max - min)) * (outMax - outMin);
+}
+
+export default function RadarStage({
+  traceEvents = [],
+  currentTickIndex = 0,
+  selectedCallsign = null,
+  hoveredCallsign = null,
+  setHoveredCallsign,
+  selectAircraftForCommand,
+  showPredictionOverlay = true,
+  currentMode = 'replay',
+  radarScopeRangeNm = 80,
+  radarView,
+  setRadarView,
+  radarBounds,
+  liveSnapshotsByCallsign,
+  latestLiveArrivalMs
+}) {
   const containerRef = useRef(null);
+  const stageRef = useRef(null);
   const [size, setSize] = useState({ width: 900, height: 560 });
-  const [frame, setFrame] = useState(emptyFrame);
+  const [interpolatedAircraft, setInterpolatedAircraft] = useState([]);
+  const [tooltip, setTooltip] = useState(null);
 
+  // Interactive Panning state
+  const [isPanning, setIsPanning] = useState(false);
+  const [lastPanPoint, setLastPanPoint] = useState(null);
+
+  // Keep track of current dimensions for ResizeObserver
   useEffect(() => {
     const resize = () => {
       const rect = containerRef.current?.getBoundingClientRect();
@@ -39,103 +95,751 @@ export default function RadarStage() {
     };
   }, []);
 
+  // Compute view bounds
+  const getViewBounds = useCallback(() => {
+    if (!radarBounds) return { minX: -10, maxX: 10, minY: -10, maxY: 10 };
+    const width = (radarBounds.maxX - radarBounds.minX) / radarView.zoom;
+    const height = (radarBounds.maxY - radarBounds.minY) / radarView.zoom;
+    return {
+      minX: radarView.centerX - width / 2,
+      maxX: radarView.centerX + width / 2,
+      minY: radarView.centerY - height / 2,
+      maxY: radarView.centerY + height / 2
+    };
+  }, [radarBounds, radarView]);
+
+  const projectPoint = useCallback((x_nm, y_nm) => {
+    const view = getViewBounds();
+    const x = project(x_nm, view.minX, view.maxX, 44, size.width - 44);
+    const y = project(y_nm, view.minY, view.maxY, size.height - 44, 44);
+    return { x, y };
+  }, [getViewBounds, size]);
+
+  // Smooth live mode interpolation
   useEffect(() => {
-    const onFrame = (event) => setFrame(event.detail || emptyFrame);
-    window.addEventListener('atc:radar-frame', onFrame);
-    return () => window.removeEventListener('atc:radar-frame', onFrame);
-  }, []);
+    const event = traceEvents[currentTickIndex];
+    if (!event) return;
 
-  const scale = useMemo(() => {
-    const sx = size.width / Math.max(1, frame.width || size.width);
-    const sy = size.height / Math.max(1, frame.height || size.height);
-    return { sx, sy };
-  }, [frame.height, frame.width, size.height, size.width]);
+    if (currentMode !== 'live') {
+      setInterpolatedAircraft(Object.values(event.state?.aircraft || {}));
+      return;
+    }
 
-  const forward = (name) => (event) => {
-    window.atcRadarInput?.[name]?.(event.evt);
+    let active = true;
+    let prevFrame = performance.now();
+
+    const loop = (ts) => {
+      if (!active) return;
+      const dt = Math.min(LIVE_INTERPOLATION.maxFrameDeltaMs, Math.max(0, ts - prevFrame));
+      prevFrame = ts;
+
+      const fallback = Object.values(event.state?.aircraft || {});
+      const delayed = latestLiveArrivalMs.current && (ts - latestLiveArrivalMs.current) > LIVE_INTERPOLATION.maxHoldMs;
+
+      const interpolated = fallback.map((ac) => {
+        const pair = liveSnapshotsByCallsign.current.get(ac.callsign);
+        if (!pair?.target) return ac;
+        const previous = pair.previous || pair.target;
+        const target = pair.target;
+        const span = Math.max(1, target.__arrivalMs - previous.__arrivalMs);
+        let alpha = (ts - LIVE_INTERPOLATION.lagMs - previous.__arrivalMs) / span;
+        if (delayed) {
+          const slowdown = Math.max(0.08, 1 - (dt / LIVE_INTERPOLATION.maxFrameDeltaMs));
+          alpha *= slowdown;
+        }
+        alpha = Math.max(0, Math.min(1, alpha));
+        if (delayed && alpha > 0.995) alpha = 0.995;
+        return {
+          ...target,
+          x_nm: lerpNumber(previous.x_nm, target.x_nm, alpha),
+          y_nm: lerpNumber(previous.y_nm, target.y_nm, alpha),
+          altitude_ft: lerpNumber(previous.altitude_ft, target.altitude_ft, alpha),
+          speed_kt: lerpNumber(previous.speed_kt, target.speed_kt, alpha),
+          heading_deg: lerpHeading(previous.heading_deg, target.heading_deg, alpha)
+        };
+      });
+
+      setInterpolatedAircraft(interpolated);
+      requestAnimationFrame(loop);
+    };
+
+    requestAnimationFrame(loop);
+    return () => {
+      active = false;
+    };
+  }, [currentMode, currentTickIndex, traceEvents, liveSnapshotsByCallsign, latestLiveArrivalMs]);
+
+  // Stage Event Handlers
+  const handleStageMouseDown = (e) => {
+    setIsPanning(true);
+    setLastPanPoint({ x: e.evt.clientX, y: e.evt.clientY });
   };
 
+  const handleStageMouseMove = (e) => {
+    const currentEvent = traceEvents[currentTickIndex];
+    if (!currentEvent) return;
+
+    const rect = containerRef.current?.getBoundingClientRect();
+    const mouseX = e.evt.clientX - rect.left;
+    const mouseY = e.evt.clientY - rect.top;
+
+    // Handle Panning
+    if (isPanning && lastPanPoint) {
+      const dx = e.evt.clientX - lastPanPoint.x;
+      const dy = e.evt.clientY - lastPanPoint.y;
+      const view = getViewBounds();
+      const worldPerPxX = (view.maxX - view.minX) / (size.width - 88);
+      const worldPerPxY = (view.maxY - view.minY) / (size.height - 88);
+
+      setRadarView((prev) => ({
+        ...prev,
+        centerX: prev.centerX - dx * worldPerPxX,
+        centerY: prev.centerY + dy * worldPerPxY
+      }));
+      setLastPanPoint({ x: e.evt.clientX, y: e.evt.clientY });
+      return;
+    }
+
+    // Handle Hover & Tooltip
+    let foundTarget = null;
+    for (const ac of interpolatedAircraft) {
+      const { x, y } = projectPoint(ac.x_nm, ac.y_nm);
+      const dist = Math.hypot(x - mouseX, y - mouseY);
+      if (dist <= 14) {
+        foundTarget = ac;
+        break;
+      }
+    }
+
+    if (foundTarget) {
+      setHoveredCallsign(foundTarget.callsign);
+      const conflictSet = new Set(
+        (currentEvent.conflicts || []).flatMap((c) => c.aircraft || [])
+      );
+      const predictedSet = new Set(
+        (currentEvent.predicted_conflicts || []).flatMap((c) => c.aircraft || [])
+      );
+      const status = conflictSet.has(foundTarget.callsign)
+        ? 'Active conflict'
+        : predictedSet.has(foundTarget.callsign)
+          ? 'Predicted conflict'
+          : foundTarget.emergency
+            ? 'Emergency'
+            : humanize(foundTarget.status || 'airborne');
+
+      setTooltip({
+        x: mouseX + 14,
+        y: mouseY + 14,
+        callsign: foundTarget.callsign,
+        role: humanize(foundTarget.role || 'aircraft'),
+        status,
+        altitude: Math.round(foundTarget.altitude_ft),
+        speed: Math.round(foundTarget.speed_kt),
+        heading: Math.round(foundTarget.heading_deg)
+      });
+    } else {
+      setHoveredCallsign(null);
+      setTooltip(null);
+    }
+  };
+
+  const handleStageMouseUp = () => {
+    setIsPanning(false);
+    setLastPanPoint(null);
+  };
+
+  const handleStageClick = () => {
+    if (isPanning && lastPanPoint) return;
+    if (hoveredCallsign) {
+      selectAircraftForCommand(selectedCallsign === hoveredCallsign ? null : hoveredCallsign);
+    } else {
+      selectAircraftForCommand(null);
+    }
+  };
+
+  const handleStageWheel = (e) => {
+    e.evt.preventDefault();
+  };
+
+  // Pre-compiled derived properties
+  const currentEvent = traceEvents[currentTickIndex];
+  const airport = currentEvent?.state?.airport || {};
+  const activeRunwayId = airport.active_runway || airport.runway_id || 'RWY';
+  const layout = airport.layout || {};
+
+  const byCallsign = useMemo(() => {
+    return Object.fromEntries(interpolatedAircraft.map((ac) => [ac.callsign, ac]));
+  }, [interpolatedAircraft]);
+
   return (
-    <div ref={containerRef} className="konva-radar" aria-hidden="true">
+    <div ref={containerRef} className="konva-radar" style={{ position: 'relative' }}>
       <Stage
+        ref={stageRef}
         width={size.width}
         height={size.height}
-        onMouseMove={forward('move')}
-        onMouseLeave={forward('leave')}
-        onClick={forward('click')}
-        onWheel={forward('wheel')}
-        onMouseDown={forward('down')}
+        onMouseDown={handleStageMouseDown}
+        onMouseMove={handleStageMouseMove}
+        onMouseUp={handleStageMouseUp}
+        onClick={handleStageClick}
+        onWheel={handleStageWheel}
+        style={{ cursor: isPanning ? 'grabbing' : 'grab' }}
       >
-        <Layer listening={false}>
+        <Layer>
+          {/* Background void */}
           <Rect x={0} y={0} width={size.width} height={size.height} fill={palette.void} />
+
+          {/* Grid lines */}
           <RadarGrid width={size.width} height={size.height} />
-          <Text x={18} y={18} text={`RUNWAY ${frame.runway || 'RWY'}`} fill={palette.text} fontFamily="JetBrains Mono, Fira Code, Consolas, monospace" fontSize={12} fontStyle="600" />
-          <ConflictLines records={frame.predictedConflicts} targets={frame.targets} scale={scale} predicted />
-          <ConflictLines records={frame.conflicts} targets={frame.targets} scale={scale} />
-          {frame.targets.map((target) => (
-            <AircraftTarget key={target.callsign} target={target} scale={scale} />
-          ))}
+
+          {/* Runway Header Info */}
+          <Text
+            x={18}
+            y={18}
+            text={`RUNWAY ${activeRunwayId}`}
+            fill={palette.text}
+            fontFamily='"JetBrains Mono", "Fira Code", Consolas, monospace'
+            fontSize={12}
+            fontStyle="600"
+          />
+
+          {/* Airport Layout (aprons, taxiways, stands, runways) */}
+          {layout && (
+            <AirportLayout
+              layout={layout}
+              activeRunwayId={activeRunwayId}
+              projectPoint={projectPoint}
+              getViewBounds={getViewBounds}
+              size={size}
+            />
+          )}
+
+          {/* Conflict Links */}
+          {currentEvent?.predicted_conflicts && (
+            <ConflictLines
+              records={currentEvent.predicted_conflicts}
+              byCallsign={byCallsign}
+              projectPoint={projectPoint}
+              color={palette.predicted}
+              dash={[6, 5]}
+            />
+          )}
+          {currentEvent?.conflicts && (
+            <ConflictLines
+              records={currentEvent.conflicts}
+              byCallsign={byCallsign}
+              projectPoint={projectPoint}
+              color={palette.conflict}
+            />
+          )}
+
+          {/* Aircraft Targets */}
+          {interpolatedAircraft.map((ac) => {
+            const conflictSet = new Set((currentEvent?.conflicts || []).flatMap((c) => c.aircraft || []));
+            const predictedSet = new Set((currentEvent?.predicted_conflicts || []).flatMap((c) => c.aircraft || []));
+            
+            const isLanded = ac.status === 'landed' || ac.status === 'exited_airspace';
+            const isSelected = ac.callsign === selectedCallsign;
+            const isHovered = ac.callsign === hoveredCallsign;
+
+            const color = isLanded
+              ? palette.landed
+              : conflictSet.has(ac.callsign)
+                ? palette.conflict
+                : ac.emergency
+                  ? palette.emergency
+                  : ac.role === 'departure'
+                    ? palette.departure
+                    : palette.arrival;
+
+            const { x, y } = projectPoint(ac.x_nm, ac.y_nm);
+
+            return (
+              <Group key={ac.callsign}>
+                {/* Selected/Hovered target crosshair reticle */}
+                {(isSelected || isHovered) && (
+                  <Group>
+                    <Circle x={x} y={y} radius={isSelected ? 13 : 10} stroke="#ffffff" strokeWidth={isSelected ? 2 : 1.5} />
+                    <Line points={[x - 17, y, x - 9, y]} stroke="#ffffff" strokeWidth={isSelected ? 2 : 1.5} />
+                    <Line points={[x + 9, y, x + 17, y]} stroke="#ffffff" strokeWidth={isSelected ? 2 : 1.5} />
+                    <Line points={[x, y - 17, x, y - 9]} stroke="#ffffff" strokeWidth={isSelected ? 2 : 1.5} />
+                    <Line points={[x, y + 9, x, y + 17]} stroke="#ffffff" strokeWidth={isSelected ? 2 : 1.5} />
+                  </Group>
+                )}
+
+                {/* Target Dot */}
+                <Circle x={x} y={y} radius={isLanded ? 3.5 : 5} stroke={color} strokeWidth={1.25} fill={isLanded ? color : palette.void} />
+
+                {/* Heading line vector */}
+                {!isLanded && (
+                  <Line
+                    points={[
+                      x,
+                      y,
+                      x + 28 * Math.cos(((Number(ac.heading_deg || 0) - 90) * Math.PI) / 180),
+                      y + 28 * Math.sin(((Number(ac.heading_deg || 0) - 90) * Math.PI) / 180)
+                    ]}
+                    stroke={color}
+                    strokeWidth={conflictSet.has(ac.callsign) ? 2 : 1.5}
+                  />
+                )}
+
+                {/* Tag connecting line and tag info card */}
+                <AircraftTagCard
+                  aircraft={ac}
+                  x={x}
+                  y={y}
+                  color={color}
+                  isConflict={conflictSet.has(ac.callsign)}
+                  isPredicted={predictedSet.has(ac.callsign)}
+                />
+              </Group>
+            );
+          })}
+
+          {/* Prediction Path Overlay for Selected Aircraft */}
+          {showPredictionOverlay && selectedCallsign && byCallsign[selectedCallsign] && (
+            <PredictionOverlay
+              aircraft={byCallsign[selectedCallsign]}
+              airportState={currentEvent?.state}
+              projectPoint={projectPoint}
+            />
+          )}
         </Layer>
       </Stage>
+
+      {/* Tooltip Popup */}
+      {tooltip && (
+        <div
+          className="radar-tooltip"
+          style={{
+            position: 'absolute',
+            left: tooltip.x,
+            top: tooltip.y,
+            zIndex: 30,
+            pointerEvents: 'none'
+          }}
+        >
+          <b>{tooltip.callsign}</b>
+          <span>{tooltip.role} - {tooltip.status}</span>
+          <span>{tooltip.altitude} ft - {tooltip.speed} kt - heading {tooltip.heading} deg</span>
+        </div>
+      )}
     </div>
   );
 }
 
 function RadarGrid({ width, height }) {
-  const lines = [];
-  for (let x = 160; x < width; x += 160) lines.push(<Line key={`x-${x}`} points={[x, 0, x, height]} stroke={palette.grid} strokeWidth={1} />);
-  for (let y = 160; y < height; y += 160) lines.push(<Line key={`y-${y}`} points={[0, y, width, y]} stroke={palette.grid} strokeWidth={1} />);
-  return lines;
+  const gridLines = [];
+  for (let x = 80; x < width; x += 80) {
+    gridLines.push(<Line key={`x-${x}`} points={[x, 0, x, height]} stroke={palette.grid} strokeWidth={1} />);
+  }
+  for (let y = 80; y < height; y += 80) {
+    gridLines.push(<Line key={`y-${y}`} points={[0, y, width, y]} stroke={palette.grid} strokeWidth={1} />);
+  }
+  return <>{gridLines}</>;
 }
 
-function ConflictLines({ records = [], targets = [], scale, predicted = false }) {
-  const byCallsign = new Map(targets.map((target) => [target.callsign, target]));
-  return records.map((record, index) => {
-    const callsigns = Array.isArray(record.aircraft) ? record.aircraft : [];
-    const a = byCallsign.get(callsigns[0]);
-    const b = byCallsign.get(callsigns[1]);
-    if (!a || !b) return null;
-    return (
-      <Line
-        key={`${predicted ? 'p' : 'c'}-${index}`}
-        points={[a.x * scale.sx, a.y * scale.sy, b.x * scale.sx, b.y * scale.sy]}
-        stroke={predicted ? palette.muted : palette.conflict}
-        strokeWidth={predicted ? 1 : 2}
-        dash={predicted ? [6, 5] : undefined}
-      />
-    );
-  });
+function ConflictLines({ records = [], byCallsign, projectPoint, color, dash }) {
+  return (
+    <>
+      {records.map((record, index) => {
+        const callsigns = record.aircraft || [record.a, record.b].filter(Boolean);
+        if (callsigns.length < 2) return null;
+        const a = byCallsign[callsigns[0]];
+        const b = byCallsign[callsigns[1]];
+        if (!a || !b) return null;
+        const ptA = projectPoint(a.x_nm, a.y_nm);
+        const ptB = projectPoint(b.x_nm, b.y_nm);
+        return (
+          <Line
+            key={`conflict-${index}`}
+            points={[ptA.x, ptA.y, ptB.x, ptB.y]}
+            stroke={color}
+            strokeWidth={dash ? 1 : 2}
+            dash={dash}
+          />
+        );
+      })}
+    </>
+  );
 }
 
-function AircraftTarget({ target, scale }) {
-  const x = target.x * scale.sx;
-  const y = target.y * scale.sy;
-  const color = target.color || palette.muted;
-  const isDeparture = target.role === 'departure';
-  const labelX = isDeparture ? x + 16 : x - 118;
-  const labelY = y - 28;
-  const headingRad = ((Number(target.headingDeg || 0) - 90) * Math.PI) / 180;
-  const vectorX = x + 28 * Math.cos(headingRad);
-  const vectorY = y + 28 * Math.sin(headingRad);
+function AirportLayout({ layout, activeRunwayId, projectPoint, getViewBounds, size }) {
+  const aprons = layout.aprons || [];
+  const taxiways = layout.taxiways || [];
+  const stands = layout.stands || [];
+  const runways = layout.runways || [];
+
+  const view = getViewBounds();
+  const scale = Math.min((size.width - 88) / (view.maxX - view.minX), (size.height - 88) / (view.maxY - view.minY));
 
   return (
     <Group>
-      {(target.selected || target.hovered) && (
-        <Group>
-          <Line points={[x - 17, y, x - 9, y]} stroke="#ffffff" strokeWidth={1.5} />
-          <Line points={[x + 9, y, x + 17, y]} stroke="#ffffff" strokeWidth={1.5} />
-          <Line points={[x, y - 17, x, y - 9]} stroke="#ffffff" strokeWidth={1.5} />
-          <Line points={[x, y + 9, x, y + 17]} stroke="#ffffff" strokeWidth={1.5} />
-        </Group>
+      {/* Aprons */}
+      {aprons.map((apron, i) => {
+        const polygon = apron.polygon || [];
+        if (polygon.length < 3) return null;
+        const points = polygon.flatMap((pt) => {
+          const projected = projectPoint(pt.x_nm, pt.y_nm);
+          return [projected.x, projected.y];
+        });
+        const labelPt = projectPoint(polygon[0].x_nm, polygon[0].y_nm);
+
+        return (
+          <Group key={`apron-${i}`}>
+            <Line
+              points={points}
+              closed
+              fill="rgba(80, 96, 105, 0.08)"
+              stroke="rgba(180, 198, 210, 0.14)"
+              strokeWidth={1}
+            />
+            {apron.id && (
+              <Text
+                x={labelPt.x + 6}
+                y={labelPt.y - 6}
+                text={apron.id}
+                fill="rgba(180, 198, 210, 0.42)"
+                fontFamily="JetBrains Mono, Fira Code, Consolas, monospace"
+                fontSize={9}
+              />
+            )}
+          </Group>
+        );
+      })}
+
+      {/* Taxiways */}
+      {taxiways.map((tw, i) => {
+        const twPoints = tw.points || [];
+        if (twPoints.length < 2) return null;
+        const points = twPoints.flatMap((pt) => {
+          const projected = projectPoint(pt.x_nm, pt.y_nm);
+          return [projected.x, projected.y];
+        });
+        const width = Math.max(1, Math.min(4, Number(tw.width_nm || 0.03) * scale));
+
+        return (
+          <Line
+            key={`taxiway-${i}`}
+            points={points}
+            stroke="rgba(180, 198, 210, 0.16)"
+            strokeWidth={width}
+            lineCap="round"
+          />
+        );
+      })}
+
+      {/* Runways */}
+      {runways.map((rw) => {
+        const ends = rw.ends || [];
+        if (ends.length < 2) return null;
+        const ptA = projectPoint(ends[0].x_nm, ends[0].y_nm);
+        const ptB = projectPoint(ends[1].x_nm, ends[1].y_nm);
+
+        return (
+          <LayoutRunway
+            key={`runway-${rw.id}`}
+            runwayId={rw.id}
+            ptA={ptA}
+            ptB={ptB}
+            widthNm={rw.width_nm}
+            scale={scale}
+            isActive={rw.id === activeRunwayId}
+          />
+        );
+      })}
+      
+      {/* If layout runways list doesn't include the active runway, draw default */}
+      {!runways.some((rw) => rw.id === activeRunwayId) && (
+        <DefaultRunway
+          runwayId={activeRunwayId}
+          projectPoint={projectPoint}
+          scale={scale}
+        />
       )}
-      <Arrow points={[x, y, vectorX, vectorY]} stroke={color} fill={color} strokeWidth={target.conflict ? 2 : 1.5} pointerLength={7} pointerWidth={6} />
-      <Rect x={x - 5} y={y - 5} width={10} height={10} stroke={color} strokeWidth={1.25} fill={palette.void} cornerRadius={5} />
-      <Line points={[x, y, isDeparture ? labelX - 5 : labelX + 107, labelY + 10]} stroke={color} strokeWidth={1} />
-      <Rect x={labelX} y={labelY} width={102} height={45} fill="rgba(3, 5, 6, 0.76)" stroke={target.conflict ? palette.conflict : color} strokeWidth={1} />
-      <Rect x={labelX} y={labelY} width={3} height={45} fill={target.conflict ? palette.conflict : color} />
-      <Text x={labelX + 8} y={labelY + 5} text={target.callsign} fill={target.conflict ? '#ffffff' : color} fontFamily="JetBrains Mono, Fira Code, Consolas, monospace" fontSize={10} fontStyle="600" />
-      <Text x={labelX + 8} y={labelY + 19} text={`${target.altitude}  ${target.speed}`} fill={palette.text} fontFamily="JetBrains Mono, Fira Code, Consolas, monospace" fontSize={10} />
-      <Text x={labelX + 8} y={labelY + 32} text={`${target.heading}  ${target.roleLabel}`} fill={palette.muted} fontFamily="JetBrains Mono, Fira Code, Consolas, monospace" fontSize={10} />
+
+      {/* Stands */}
+      {stands.map((stand, i) => {
+        if (!stand?.position) return null;
+        const { x, y } = projectPoint(stand.position.x_nm, stand.position.y_nm);
+
+        return (
+          <Group key={`stand-${i}`}>
+            <Circle x={x} y={y} radius={4} fill="rgba(180, 198, 210, 0.34)" stroke="#0b0f12" strokeWidth={1} />
+            {stand.id && (
+              <Text
+                x={x + 7}
+                y={y + 4}
+                text={stand.id}
+                fill="rgba(180, 198, 210, 0.46)"
+                fontFamily='"JetBrains Mono", "Fira Code", Consolas, monospace'
+                fontSize={9}
+              />
+            )}
+          </Group>
+        );
+      })}
+    </Group>
+  );
+}
+
+function DefaultRunway({ runwayId, projectPoint, scale }) {
+  const points = runwayWorldPoints(runwayId);
+  if (points.length < 2) return null;
+  const ptA = projectPoint(points[0].x_nm, points[0].y_nm);
+  const ptB = projectPoint(points[1].x_nm, points[1].y_nm);
+  return (
+    <LayoutRunway
+      runwayId={runwayId}
+      ptA={ptA}
+      ptB={ptB}
+      widthNm={null}
+      scale={scale}
+      isActive={true}
+    />
+  );
+}
+
+function LayoutRunway({ runwayId, ptA, ptB, widthNm, scale, isActive }) {
+  const x1 = ptA.x;
+  const y1 = ptA.y;
+  const x2 = ptB.x;
+  const y2 = ptB.y;
+
+  const lengthPx = Math.hypot(x2 - x1, y2 - y1);
+  if (!lengthPx) return null;
+
+  const width = widthNm && Number(widthNm) > 0
+    ? Math.max(4, Math.min(20, (Number(widthNm) * scale) / 2))
+    : Math.max(8, Math.min(18, lengthPx * 0.05));
+
+  const dx = (x2 - x1) / lengthPx;
+  const dy = (y2 - y1) / lengthPx;
+  const px = -dy;
+  const py = dx;
+
+  // Opposite runway name
+  const opposite = () => {
+    const match = String(runwayId || '').match(/\d{2}/);
+    if (!match) return '';
+    const n = Number(match[0]);
+    if (!n) return '';
+    const opp = ((n + 17) % 36) + 1;
+    return String(opp).padStart(2, '0');
+  };
+
+  const points = [
+    x1 + px * width, y1 + py * width,
+    x2 + px * width, y2 + py * width,
+    x2 - px * width, y2 - py * width,
+    x1 - px * width, y1 - py * width
+  ];
+
+  return (
+    <Group>
+      {/* Runway Fill/Border Rect */}
+      <Line
+        points={points}
+        closed
+        fill={isActive ? 'rgba(180, 198, 210, 0.08)' : 'rgba(100, 116, 139, 0.05)'}
+        stroke={isActive ? 'rgba(222, 234, 240, 0.4)' : 'rgba(148, 163, 184, 0.18)'}
+        strokeWidth={1}
+      />
+
+      {/* Centerline */}
+      {lengthPx > 90 && (
+        <Line
+          points={[x1 + dx * 20, y1 + dy * 20, x2 - dx * 20, y2 - dy * 20]}
+          stroke={isActive ? 'rgba(244, 247, 248, 0.42)' : 'rgba(203, 213, 225, 0.2)'}
+          strokeWidth={1}
+          dash={[18, 12]}
+        />
+      )}
+
+      {/* Endmarks */}
+      <Line
+        points={[x1 + px * width * 0.8, y1 + py * width * 0.8, x1 - px * width * 0.8, y1 - py * width * 0.8]}
+        stroke={isActive ? 'rgba(244, 247, 248, 0.72)' : 'rgba(203, 213, 225, 0.3)'}
+        strokeWidth={2}
+      />
+      <Line
+        points={[x2 + px * width * 0.8, y2 + py * width * 0.8, x2 - px * width * 0.8, y2 - py * width * 0.8]}
+        stroke={isActive ? 'rgba(244, 247, 248, 0.72)' : 'rgba(203, 213, 225, 0.3)'}
+        strokeWidth={2}
+      />
+
+      {/* Runway Labels */}
+      <Text
+        x={x1 - dx * 16}
+        y={y1 - dy * 16}
+        text={runwayId}
+        fill={isActive ? '#f4f7f8' : 'rgba(203, 213, 225, 0.46)'}
+        fontFamily='"JetBrains Mono", "Fira Code", Consolas, monospace'
+        fontSize={11}
+        fontStyle="700"
+        align="center"
+        offsetX={10} // approx text center centering
+        offsetY={5}
+      />
+      <Text
+        x={x2 + dx * 16}
+        y={y2 + dy * 16}
+        text={opposite()}
+        fill={isActive ? '#f4f7f8' : 'rgba(203, 213, 225, 0.46)'}
+        fontFamily='"JetBrains Mono", "Fira Code", Consolas, monospace'
+        fontSize={11}
+        fontStyle="700"
+        align="center"
+        offsetX={10}
+        offsetY={5}
+      />
+    </Group>
+  );
+}
+
+function AircraftTagCard({ aircraft, x, y, color, isConflict, isPredicted }) {
+  const role = String(aircraft.role || '').toLowerCase();
+  const isDeparture = role === 'departure';
+  const labelX = isDeparture ? x + 16 : x - 118;
+  const labelY = y - 28;
+  const tagWidth = 102;
+  const tagHeight = 45;
+
+  const callsign = String(aircraft.callsign || 'UNKNOWN').toUpperCase();
+  const altitude = formatFlightLevel(aircraft.altitude_ft);
+  const speed = `${Math.round(Number(aircraft.speed_kt) || 0)}KT`;
+  const heading = `${String(Math.round(Number(aircraft.heading_deg) || 0)).padStart(3, '0')}H`;
+
+  return (
+    <Group>
+      {/* Connector line */}
+      <Line
+        points={[x, y, isDeparture ? labelX - 5 : labelX + tagWidth + 5, labelY + 10]}
+        stroke={color}
+        strokeWidth={1}
+      />
+
+      {/* Tag Card Background */}
+      <Rect
+        x={labelX}
+        y={labelY}
+        width={tagWidth}
+        height={tagHeight}
+        fill="rgba(3, 5, 6, 0.76)"
+        stroke={isConflict ? palette.conflict : color}
+        strokeWidth={1}
+      />
+
+      {/* Alert strip */}
+      <Rect
+        x={labelX}
+        y={labelY}
+        width={3}
+        height={tagHeight}
+        fill={isConflict ? palette.conflict : color}
+      />
+
+      {/* Callsign */}
+      <Text
+        x={labelX + 8}
+        y={labelY + 5}
+        text={callsign.slice(0, 10)}
+        fill={isConflict ? '#ffffff' : color}
+        fontFamily='"JetBrains Mono", "Fira Code", Consolas, monospace'
+        fontSize={10}
+        fontStyle="600"
+      />
+
+      {/* Altitude & Speed */}
+      <Text
+        x={labelX + 8}
+        y={labelY + 19}
+        text={`${altitude}  ${speed}`}
+        fill={isPredicted && !isConflict ? '#dbe8ee' : palette.text}
+        fontFamily='"JetBrains Mono", "Fira Code", Consolas, monospace'
+        fontSize={10}
+        fontStyle="500"
+      />
+
+      {/* Heading & Role */}
+      <Text
+        x={labelX + 8}
+        y={labelY + 32}
+        text={`${heading}  ${role ? role.slice(0, 3).toUpperCase() : 'UNK'}`}
+        fill={palette.mutedText}
+        fontFamily='"JetBrains Mono", "Fira Code", Consolas, monospace'
+        fontSize={10}
+      />
+    </Group>
+  );
+}
+
+function PredictionOverlay({ aircraft, airportState = {}, projectPoint }) {
+  if (!Number.isFinite(Number(aircraft.x_nm)) || !Number.isFinite(Number(aircraft.y_nm))) return null;
+  const headingDeg = Number(aircraft.heading_deg);
+  const speedKt = Number(aircraft.speed_kt);
+  if (!Number.isFinite(headingDeg) || !Number.isFinite(speedKt)) return null;
+
+  const weather = airportState.weather || {};
+  const windSpeedKt = Number(weather.wind_speed_kt ?? weather.wind_speed_kts ?? weather.wind_kt ?? weather.speed_kt);
+  const windFromDeg = Number(weather.wind_dir_deg ?? weather.wind_direction_deg ?? weather.wind_from_deg ?? weather.direction_deg);
+  let windVector = null;
+  if (Number.isFinite(windSpeedKt) && windSpeedKt > 0 && Number.isFinite(windFromDeg)) {
+    const toHeadingDeg = (windFromDeg + 180) % 360;
+    windVector = { speedKt: windSpeedKt, headingRad: ((toHeadingDeg - 90) * Math.PI) / 180 };
+  }
+
+  const projectPosition = (sec) => {
+    const headingRad = ((headingDeg - 90) * Math.PI) / 180;
+    const distanceNm = (speedKt * sec) / 3600;
+    let dx = Math.cos(headingRad) * distanceNm;
+    let dy = Math.sin(headingRad) * distanceNm;
+    if (windVector) {
+      const windDistanceNm = (windVector.speedKt * sec) / 3600;
+      dx += Math.cos(windVector.headingRad) * windDistanceNm;
+      dy += Math.sin(windVector.headingRad) * windDistanceNm;
+    }
+    return {
+      x_nm: Number(aircraft.x_nm) + dx,
+      y_nm: Number(aircraft.y_nm) + dy
+    };
+  };
+
+  const points = [60, 120, 180].map(projectPosition);
+  const all = [{ x_nm: Number(aircraft.x_nm), y_nm: Number(aircraft.y_nm) }, ...points];
+  
+  const linePoints = all.flatMap((pt) => {
+    const projected = projectPoint(pt.x_nm, pt.y_nm);
+    return [projected.x, projected.y];
+  });
+
+  return (
+    <Group>
+      {/* Path Line */}
+      <Line
+        points={linePoints}
+        stroke="rgba(244, 247, 248, 0.72)"
+        strokeWidth={1}
+        dash={[4, 5]}
+      />
+
+      {/* Markers */}
+      {points.map((point, idx) => {
+        const { x, y } = projectPoint(point.x_nm, point.y_nm);
+        return (
+          <Group key={`marker-${idx}`}>
+            <Circle x={x} y={y} radius={2.8} fill="rgba(244, 247, 248, 0.9)" />
+            <Text
+              x={x + 6}
+              y={y - 6}
+              text={`+${idx + 1}m`}
+              fill="rgba(244, 247, 248, 0.9)"
+              fontFamily='"JetBrains Mono", "Fira Code", Consolas, monospace'
+              fontSize={10}
+            />
+          </Group>
+        );
+      })}
     </Group>
   );
 }
