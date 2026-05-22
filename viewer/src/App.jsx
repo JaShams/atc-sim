@@ -276,7 +276,7 @@ function ScorePanel({ score }) {
     return (
       <article className="panel hud-score-panel score-panel">
         <SectionHeading eyebrow="Run Result" title="Score" />
-        <p className="muted">No score file loaded. The replay still works, but score explanations and run metadata are limited.</p>
+        <p className="muted">No score file loaded.</p>
       </article>
     );
   }
@@ -669,13 +669,13 @@ function TimelinePanel({ state, embedded = false }) {
     <>
       <div className="timeline-filters">
         <label title="Show only moments where the controller's action reduced the score.">
-          <input type="checkbox" checked={state.filterHurt} onChange={(event) => state.setFilterHurt(event.target.checked)} /> Only hurt ticks
+          <input type="checkbox" checked={state.filterHurt} onChange={(event) => state.setFilterHurt(event.target.checked)} /> Hurt
         </label>
         <label title="Show calls caused by conflicts, runway risks, emergencies, or explicit events.">
-          <input type="checkbox" checked={state.filterSafety} onChange={(event) => state.setFilterSafety(event.target.checked)} /> Only safety-triggered calls
+          <input type="checkbox" checked={state.filterSafety} onChange={(event) => state.setFilterSafety(event.target.checked)} /> Safety
         </label>
         <label title="Show only moments where the normalized score changed by at least 0.05.">
-          <input type="checkbox" checked={state.filterLargeDelta} onChange={(event) => state.setFilterLargeDelta(event.target.checked)} /> Only large deltas (|&Delta;| &ge; 0.05)
+          <input type="checkbox" checked={state.filterLargeDelta} onChange={(event) => state.setFilterLargeDelta(event.target.checked)} /> Large delta
         </label>
       </div>
       <div className="timeline-list">
@@ -696,7 +696,7 @@ function TimelinePanel({ state, embedded = false }) {
                   <span>#{index + 1} - {event.time}s</span>
                   <span className={`outcome-badge outcome-${outcomeKind}`}>{humanize(outcomeKind)}</span>
                   <span>{primaryReason(event)}</span>
-                  <span>{summarizeAction(explanation.action_chosen || event.actions || [])}</span>
+                  {!embedded && <span>{summarizeAction(explanation.action_chosen || event.actions || [])}</span>}
                 </span>
                 <span className="timeline-summary-right">{scoreImpactLabel(totalDelta, immediateDelta)}</span>
                 </>
@@ -818,6 +818,7 @@ function ReplayLayout({ state, event }) {
   return (
     <section className="replay-overlay-layer workspace-overlay" aria-label="Replay mode workspace">
       <ReplaySidebar state={state} event={event} />
+      <BottomHud state={state} />
     </section>
   );
 }
@@ -835,7 +836,6 @@ export default function App() {
         </div>
         {isLive ? <LiveLayout state={state} event={event} /> : <ReplayLayout state={state} event={event} />}
       </section>
-      {!isLive && <BottomHud state={state} />}
     </main>
   );
 }

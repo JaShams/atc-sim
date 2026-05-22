@@ -411,12 +411,13 @@ pre {
 .replay-info-panel {
   display: grid;
   align-content: start;
-  gap: 8px;
+  flex: 0 0 auto;
+  gap: 6px;
   min-height: 0;
-  max-height: 42%;
-  overflow: auto;
+  max-height: none;
+  overflow: visible;
   border-bottom: 1px solid var(--line);
-  padding: 10px;
+  padding: 8px;
 }
 
 .live-control-panel {
@@ -700,15 +701,16 @@ pre {
   min-height: 0;
   flex: 1 1 auto;
   overflow: auto;
+  scrollbar-width: thin;
 }
 
 .replay-sidebar-panel {
-  height: 100%;
-  overflow: auto;
+  min-height: 100%;
+  overflow: visible;
   border: 0;
   border-radius: 0;
   background: transparent;
-  padding: 10px;
+  padding: 8px;
 }
 
 .replay-detail-section {
@@ -727,7 +729,8 @@ pre {
 
 .replay-sidebar .file-controls {
   display: grid;
-  gap: 7px;
+  gap: 5px;
+  padding: 6px;
 }
 
 .replay-sidebar .summary-band,
@@ -741,6 +744,43 @@ pre {
 
 .replay-sidebar .hud-score-panel .score-hero {
   margin-bottom: 0;
+}
+
+.replay-sidebar .file-picker {
+  min-height: 28px;
+  padding: 4px 6px;
+  font-size: 0.66rem;
+}
+
+.replay-sidebar input[type="file"] {
+  max-width: 96px;
+  font-size: 0.62rem;
+}
+
+.replay-sidebar .summary-band,
+.replay-sidebar .hud-score-panel {
+  padding: 6px 8px;
+}
+
+.replay-sidebar .summary-band h2 {
+  font-size: 0.74rem;
+}
+
+.replay-sidebar .eyebrow,
+.replay-sidebar label,
+.replay-sidebar .muted {
+  font-size: 0.66rem;
+}
+
+.replay-sidebar h3 {
+  margin-bottom: 5px;
+  font-size: 0.72rem;
+}
+
+.replay-sidebar p {
+  margin-bottom: 7px;
+  font-size: 0.76rem;
+  line-height: 1.35;
 }
 
 .live-alert-card,
@@ -1069,18 +1109,15 @@ pre {
 }
 
 .bottom-hud {
-  position: relative;
+  position: absolute;
   z-index: 19;
-  flex: 0 0 auto;
-  margin: 0 16px 16px;
+  right: 16px;
+  bottom: 16px;
+  left: calc(var(--live-sidebar-width) + 16px);
   display: flex;
   justify-content: center;
   align-items: end;
   pointer-events: none;
-}
-
-.mode-replay .bottom-hud {
-  margin-left: calc(var(--live-sidebar-width) + 16px);
 }
 
 .bottom-hud>* {
@@ -1093,6 +1130,41 @@ pre {
   min-width: 640px;
   min-height: 46px;
   padding: 8px 10px;
+}
+
+.mode-replay .replay-controls {
+  min-height: 32px;
+  padding: 4px 7px;
+  gap: 6px;
+}
+
+.mode-replay .replay-controls button,
+.mode-replay .replay-controls select {
+  min-height: 26px;
+  min-width: 30px;
+  padding: 0 8px;
+  font-size: 0.68rem;
+}
+
+.mode-replay .replay-controls select {
+  padding-right: 24px;
+}
+
+.mode-replay .replay-controls .tick-readout {
+  padding: 4px 7px;
+  font-size: 0.68rem;
+  line-height: 1;
+}
+
+.mode-replay .replay-controls label {
+  font-size: 0.66rem;
+  line-height: 1;
+}
+
+.mode-replay .replay-controls .prediction-toggle {
+  gap: 4px;
+  font-size: 0.66rem;
+  line-height: 1;
 }
 
 .scope-controls {
@@ -1124,7 +1196,7 @@ pre {
   position: static;
   width: auto;
   max-height: none;
-  overflow: auto;
+  overflow: visible;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -1512,29 +1584,99 @@ dd {
 .replay-sidebar .history-drawer,
 .replay-sidebar .tick-drawer {
   max-height: none;
+  overflow: visible;
+}
+
+.replay-sidebar .section-heading {
+  margin-bottom: 7px;
+}
+
+.replay-sidebar .sub-panel {
+  margin-top: 8px;
+  padding: 8px;
+}
+
+.replay-sidebar .sub-panel:first-of-type {
+  margin-top: 0;
+}
+
+.replay-sidebar dl {
+  grid-template-columns: minmax(68px, 0.75fr) minmax(0, 1.25fr);
+  gap: 5px 8px;
+  font-size: 0.7rem;
+}
+
+.replay-sidebar .outcome-badge {
+  padding: 3px 5px;
+  font-size: 0.6rem;
 }
 
 .timeline-filters {
   display: flex;
   flex-wrap: wrap;
-  gap: 14px;
-  margin-bottom: 10px;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 
 .timeline-filters label {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   color: var(--muted-strong);
-  font-size: 0.74rem;
+  font-size: 0.68rem;
 }
 
 .timeline-list {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 5px;
   max-height: 560px;
   overflow: auto;
+}
+
+.replay-sidebar .timeline-list {
+  max-height: none;
+  overflow: visible;
+}
+
+.replay-sidebar .timeline-item {
+  border-width: 0 0 1px;
+  border-radius: 0;
+  background: transparent;
+}
+
+.replay-sidebar .timeline-summary {
+  align-items: flex-start;
+  min-height: 0;
+  padding: 7px 4px;
+}
+
+.replay-sidebar .timeline-summary .disclosure-icon {
+  margin-top: 2px;
+}
+
+.replay-sidebar .timeline-summary-left {
+  align-items: flex-start;
+  gap: 4px 5px;
+  font-size: 0.68rem;
+  line-height: 1.22;
+}
+
+.replay-sidebar .timeline-summary-left span:nth-child(3) {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.replay-sidebar .timeline-summary-right {
+  padding-top: 2px;
+  font-size: 0.62rem;
+  white-space: nowrap;
+}
+
+.replay-sidebar .timeline-body {
+  padding: 7px 4px 9px 20px;
 }
 
 .timeline-item {
@@ -1548,8 +1690,8 @@ dd {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
-  padding: 10px 11px;
+  gap: 8px;
+  padding: 8px 9px;
   cursor: pointer;
   color: var(--text);
   text-align: left;
@@ -1564,7 +1706,7 @@ dd {
   flex: 1 1 auto;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -1572,19 +1714,21 @@ dd {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 5px;
+  font-size: 0.72rem;
 }
 
 .timeline-summary-right {
   flex: 0 0 auto;
   color: var(--muted-strong);
   font-family: var(--mono);
+  font-size: 0.68rem;
   font-weight: 750;
 }
 
 .timeline-body {
   border-top: 1px solid var(--line);
-  padding: 10px 11px 12px;
+  padding: 8px 9px 10px;
 }
 
 .timeline-actions {
@@ -1754,19 +1898,34 @@ dd {
   }
 
   .bottom-hud {
-    margin: 0 8px 8px;
-    grid-template-columns: 1fr;
+    right: 8px;
+    bottom: 8px;
+    left: 8px;
     gap: 8px;
-  }
-
-  .mode-replay .bottom-hud {
-    margin-left: 8px;
   }
 
   .replay-controls {
     width: auto;
     min-width: 0;
     justify-self: stretch;
+  }
+
+  .mode-replay .replay-controls {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
+  .mode-replay .replay-controls button,
+  .mode-replay .replay-controls label,
+  .mode-replay .replay-controls select,
+  .mode-replay .replay-controls .tick-readout,
+  .mode-replay .replay-controls .scope-controls {
+    flex: 0 0 auto;
+  }
+
+  .mode-replay .replay-controls .tick-slider {
+    flex: 0 0 160px;
   }
 
   .history-drawer,

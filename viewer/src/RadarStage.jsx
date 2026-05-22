@@ -76,7 +76,7 @@ export default function RadarStage({
 
   // Interactive Panning state
   const [isPanning, setIsPanning] = useState(false);
-  const [lastPanPoint, setLastPanPoint] = useState(null);
+  const panRef = useRef({ isDown: false, start: null, last: null, dragged: false });
 
   // Keep track of current dimensions for ResizeObserver
   useEffect(() => {
@@ -171,8 +171,9 @@ export default function RadarStage({
 
   // Stage Event Handlers
   const handleStageMouseDown = (e) => {
+    const point = { x: e.evt.clientX, y: e.evt.clientY };
+    panRef.current = { isDown: true, start: point, last: point, dragged: false };
     setIsPanning(true);
-    setLastPanPoint({ x: e.evt.clientX, y: e.evt.clientY });
   };
 
   const handleStageMouseMove = (e) => {
@@ -184,9 +185,12 @@ export default function RadarStage({
     const mouseY = e.evt.clientY - rect.top;
 
     // Handle Panning
-    if (isPanning && lastPanPoint) {
-      const dx = e.evt.clientX - lastPanPoint.x;
-      const dy = e.evt.clientY - lastPanPoint.y;
+    if (panRef.current.isDown && panRef.current.last) {
+      const dx = e.evt.clientX - panRef.current.last.x;
+      const dy = e.evt.clientY - panRef.current.last.y;
+      const totalDx = e.evt.clientX - panRef.current.start.x;
+      const totalDy = e.evt.clientY - panRef.current.start.y;
+      if (Math.hypot(totalDx, totalDy) > 3) panRef.current.dragged = true;
       const view = getViewBounds();
       const worldPerPxX = (view.maxX - view.minX) / (size.width - 88);
       const worldPerPxY = (view.maxY - view.minY) / (size.height - 88);
@@ -196,7 +200,8 @@ export default function RadarStage({
         centerX: prev.centerX - dx * worldPerPxX,
         centerY: prev.centerY + dy * worldPerPxY
       }));
-      setLastPanPoint({ x: e.evt.clientX, y: e.evt.clientY });
+      const nextPoint = { x: e.evt.clientX, y: e.evt.clientY };
+      panRef.current.last = nextPoint;
       return;
     }
 
@@ -245,13 +250,29 @@ export default function RadarStage({
 
   const handleStageMouseUp = () => {
     setIsPanning(false);
-    setLastPanPoint(null);
+    panRef.current.isDown = false;
   };
 
-  const handleStageClick = () => {
-    if (isPanning && lastPanPoint) return;
-    if (hoveredCallsign) {
-      selectAircraftForCommand(selectedCallsign === hoveredCallsign ? null : hoveredCallsign);
+  const aircraftAtPoint = useCallback((clientX, clientY) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    const mouseX = clientX - rect.left;
+    const mouseY = clientY - rect.top;
+    for (const ac of interpolatedAircraft) {
+      const { x, y } = projectPoint(ac.x_nm, ac.y_nm);
+      if (Math.hypot(x - mouseX, y - mouseY) <= 14) return ac.callsign;
+    }
+    return null;
+  }, [interpolatedAircraft, projectPoint]);
+
+  const handleStageClick = (e) => {
+    if (panRef.current.dragged) {
+      panRef.current.dragged = false;
+      return;
+    }
+    const clickedCallsign = aircraftAtPoint(e.evt.clientX, e.evt.clientY);
+    if (clickedCallsign) {
+      selectAircraftForCommand(selectedCallsign === clickedCallsign ? null : clickedCallsign);
     } else {
       selectAircraftForCommand(null);
     }
