@@ -25,8 +25,8 @@ const zoomOut = document.getElementById('zoomOut');
 const resetView = document.getElementById('resetView');
 const modeSelect = document.getElementById('modeSelect');
 const modeStatus = document.getElementById('modeStatus');
+const liveSessionControls = document.getElementById('liveSessionControls');
 const livePanel = document.getElementById('livePanel');
-const liveEndpointInput = document.getElementById('liveEndpoint');
 const liveConnect = document.getElementById('liveConnect');
 const liveDisconnect = document.getElementById('liveDisconnect');
 const livePause = document.getElementById('livePause');
@@ -40,12 +40,14 @@ const liveStats = document.getElementById('liveStats');
 const liveAlerts = document.getElementById('liveAlerts');
 const liveStrips = document.getElementById('liveStrips');
 const liveEventLog = document.getElementById('liveEventLog');
-const commandAircraft = document.getElementById('commandAircraft');
+const commandText = document.getElementById('commandText');
 const commandType = document.getElementById('commandType');
 const commandValue = document.getElementById('commandValue');
+const commandValueLabel = document.querySelector('.command-value-label');
 const sendCommand = document.getElementById('sendCommand');
 const commandHint = document.getElementById('commandHint');
 const commandFeedback = document.getElementById('commandFeedback');
+const commandActions = Array.from(document.querySelectorAll('.command-action'));
 
 let traceEvents = [];
 let score = null;
@@ -69,6 +71,10 @@ let latestLiveArrivalMs = 0;
 let liveFollowTail = true;
 let livePaused = false;
 let liveLogEntries = [];
+let radarScopeRangeNm = 80;
+let liveResetPending = false;
+
+const DEFAULT_LIVE_ENDPOINT = 'ws://localhost:8080/live';
 
 const LIVE_INTERPOLATION = {
   lagMs: 220,
@@ -77,14 +83,19 @@ const LIVE_INTERPOLATION = {
 };
 
 const palette = {
-  normal: '#2563eb',
-  emergency: '#b45309',
-  predicted: '#9333ea',
-  conflict: '#dc2626',
-  landed: '#64748b',
-  runway: '#94a3b8',
-  text: '#f8fafc',
-  mutedText: '#cbd5e1'
+  arrival: '#22f4ff',
+  departure: '#ffb23f',
+  normal: '#9fb2bd',
+  emergency: '#ffffff',
+  predicted: '#b6c5cc',
+  conflict: '#ff2f55',
+  landed: '#51606a',
+  runway: 'rgba(222, 234, 240, 0.58)',
+  text: '#f4f7f8',
+  mutedText: '#8ea0aa',
+  structure: 'rgba(180, 198, 210, 0.16)',
+  structureStrong: 'rgba(214, 228, 238, 0.28)',
+  void: '#0b0f12'
 };
 
 const labelMap = {
@@ -144,8 +155,8 @@ playSpeed.addEventListener('change', () => {
     startPlayback();
   }
 });
-zoomIn.addEventListener('click', () => zoomRadar(1.35));
-zoomOut.addEventListener('click', () => zoomRadar(1 / 1.35));
+zoomIn.addEventListener('click', () => handleRadarScopeButton('in'));
+zoomOut.addEventListener('click', () => handleRadarScopeButton('out'));
 resetView.addEventListener('click', resetTimelineOrView);
 filterHurt.addEventListener('change', renderTimeline);
 filterSafety.addEventListener('change', renderTimeline);
@@ -157,6 +168,8 @@ canvas.addEventListener('wheel', handleRadarWheel, { passive: false });
 canvas.addEventListener('mousedown', startRadarPan);
 window.addEventListener('mousemove', panRadar);
 window.addEventListener('mouseup', stopRadarPan);
+window.addEventListener('resize', handleRadarResize);
+window.visualViewport?.addEventListener('resize', handleRadarResize);
 togglePrediction.addEventListener('change', () => {
   showPredictionOverlay = togglePrediction.checked;
   drawCurrentRadar();
@@ -168,8 +181,16 @@ livePause.addEventListener('click', () => sendLiveControl(livePaused ? 'resume' 
 liveReset.addEventListener('click', () => sendLiveControl('reset'));
 liveEnd.addEventListener('click', () => sendLiveControl('end_session'));
 sendCommand.addEventListener('click', sendLiveCommand);
-commandType.addEventListener('change', syncCommandFormForType);
+commandActions.forEach((button) => {
+  button.addEventListener('click', () => selectCommandType(button.dataset.commandType));
+});
 commandValue.addEventListener('input', () => setCommandFeedback(null, ''));
+commandText.addEventListener('input', () => setCommandFeedback(null, ''));
+commandText.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter') return;
+  event.preventDefault();
+  sendLiveCommand();
+});
 
 const COMMAND_SCHEMA = {
   no_op: { label: 'No action', unitHint: null },
@@ -200,9 +221,23 @@ const VALIDATOR_REASON_MESSAGES = {
 };
 
 renderRadarLegend();
+syncRadarCanvasSize();
 handleModeChange();
 syncCommandFormForType();
 startLiveFrameLoop();
+
+if ('ResizeObserver' in window) {
+  const radarResizeObserver = new ResizeObserver(handleRadarResize);
+  radarResizeObserver.observe(canvas);
+}
+
+window.atcRadarInput = {
+  move: handleRadarMove,
+  leave: hideRadarTooltip,
+  click: handleRadarClick,
+  wheel: handleRadarWheel,
+  down: startRadarPan
+};
 
 async function loadFiles() {
   if (!traceFileInput.files[0]) return;
@@ -211,7 +246,8 @@ async function loadFiles() {
     traceEvents = await parseJsonl(traceFileInput.files[0]);
     score = scoreFileInput.files[0] ? JSON.parse(await scoreFileInput.files[0].text()) : null;
     radarBounds = calculateBounds(traceEvents);
-    resetRadarView(false);
+    radarScopeRangeNm = radarBounds.defaultRangeNm || 80;
+    resetScopeView(false);
     selectedCallsign = null;
     hoveredCallsign = null;
     const hasTrace = traceEvents.length > 0;
@@ -242,17 +278,32 @@ function handleModeChange() {
   const isLive = currentMode === 'live';
   document.body.classList.toggle('live-mode', isLive);
   livePanel.hidden = !isLive;
+  liveSessionControls.hidden = !isLive;
   liveGamePanel.hidden = !isLive;
   traceFileInput.closest('section').hidden = isLive;
   modeStatus.textContent = isLive
-    ? 'Live mode connects to a backend adapter and streams tick snapshots.'
+    ? 'Live mode uses a stable tactical scope with preset range rings.'
     : 'Replay mode loads files from disk.';
+  syncRadarControlsForMode();
   if (!isLive) disconnectLiveTransport();
   syncPlaybackButton();
 }
 
+function syncRadarControlsForMode() {
+  const isLive = currentMode === 'live';
+  zoomOut.textContent = '40nm';
+  zoomIn.textContent = '80nm';
+  zoomOut.title = 'Set scope to 40 nautical miles';
+  zoomIn.title = 'Set scope to 80 nautical miles';
+  zoomOut.setAttribute('aria-label', 'Set scope to 40 nautical miles');
+  zoomIn.setAttribute('aria-label', 'Set scope to 80 nautical miles');
+  resetView.textContent = isLive ? 'Live' : 'Reset';
+  resetView.title = isLive ? 'Return to live tail and stable scope' : 'Recenter radar scope';
+  resetView.setAttribute('aria-label', isLive ? 'Return to live tail and stable scope' : 'Recenter radar scope');
+}
+
 function connectLiveTransport() {
-  const endpoint = (liveEndpointInput.value || '').trim();
+  const endpoint = resolveLiveEndpoint();
   if (!endpoint) return;
   disconnectLiveTransport();
   resetLiveRunState();
@@ -316,6 +367,7 @@ function resetLiveRunState() {
   liveSessionId = null;
   livePaused = false;
   liveLogEntries = [];
+  radarScopeRangeNm = 80;
   slider.disabled = true;
   playPause.disabled = true;
   stepBack.disabled = true;
@@ -323,7 +375,8 @@ function resetLiveRunState() {
   zoomIn.disabled = true;
   zoomOut.disabled = true;
   resetView.disabled = true;
-  clearNode(commandAircraft);
+  selectedCallsign = null;
+  updateSelectedAircraftCommand();
   renderLiveDashboard(null);
   syncLiveControlButtons();
 }
@@ -336,9 +389,11 @@ function resetLiveSessionView() {
   currentTickIndex = 0;
   selectedCallsign = null;
   hoveredCallsign = null;
+  updateSelectedAircraftCommand();
   liveSnapshotsByCallsign.clear();
   latestLiveArrivalMs = 0;
   liveFollowTail = true;
+  liveResetPending = false;
   slider.min = 0;
   slider.max = 0;
   slider.value = 0;
@@ -346,7 +401,7 @@ function resetLiveSessionView() {
   renderTimeline();
   renderScore();
   renderAircraftPanel(null, null);
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.clearRect(0, 0, radarWidth(), radarHeight());
 }
 
 function handleLiveEnvelope(payload) {
@@ -368,6 +423,8 @@ function handleLiveEnvelope(payload) {
   }
   const event = payload.tick || payload;
   if (!event?.state) return;
+  if (liveResetPending && Number(event.time) > 1) return;
+  liveResetPending = false;
   ingestLiveSnapshots(event);
   traceEvents.push(event);
   slider.disabled = false;
@@ -378,7 +435,8 @@ function handleLiveEnvelope(payload) {
   zoomOut.disabled = false;
   resetView.disabled = false;
   radarBounds = calculateBounds(traceEvents);
-  if (!radarView) resetRadarView(false);
+  if (radarBounds.defaultRangeNm && traceEvents.length === 1) radarScopeRangeNm = radarBounds.defaultRangeNm;
+  resetScopeView(false);
   slider.max = Math.max(0, traceEvents.length - 1);
   if (currentMode !== 'live' || liveFollowTail) {
     renderAtTick(traceEvents.length - 1);
@@ -386,6 +444,7 @@ function handleLiveEnvelope(payload) {
   renderTimeline();
   populateAircraftSelector(event);
   renderLiveDashboard(event);
+  syncRadarControlsForMode();
 }
 
 function handleLiveControlStatus(payload) {
@@ -401,6 +460,7 @@ function handleLiveControlStatus(payload) {
   appendLiveLog(`Simulation ${humanize(status)}.`);
   if (status === 'reset') {
     liveFollowTail = true;
+    liveResetPending = true;
   }
 }
 
@@ -421,6 +481,7 @@ function sendLiveControl(type) {
     appendLiveLog('Resume requested.');
   } else if (type === 'reset') {
     resetLiveSessionView();
+    liveResetPending = true;
     updateLiveRunState('Resetting');
     appendLiveLog('Scenario reset requested.');
   } else if (type === 'end_session') {
@@ -519,12 +580,13 @@ function renderFlightStrips(event, aircraft) {
     const strip = document.createElement('button');
     strip.type = 'button';
     strip.className = 'flight-strip';
+    if (String(ac.role || '').toLowerCase() === 'departure') strip.classList.add('departure');
+    if (String(ac.role || '').toLowerCase() === 'arrival') strip.classList.add('arrival');
     if (selectedCallsign === ac.callsign) strip.classList.add('selected');
     if (conflictSet.has(ac.callsign)) strip.classList.add('critical');
     else if (predictedSet.has(ac.callsign) || ac.emergency) strip.classList.add('warn');
     strip.addEventListener('click', () => {
-      selectedCallsign = ac.callsign;
-      commandAircraft.value = ac.callsign;
+      selectAircraftForCommand(selectedCallsign === ac.callsign ? null : ac.callsign);
       drawCurrentRadar();
       renderAircraftPanel(traceEvents[currentTickIndex], selectedCallsign);
     });
@@ -539,7 +601,10 @@ function renderFlightStrips(event, aircraft) {
     const clearance = document.createElement('span');
     clearance.className = 'strip-clearance';
     clearance.textContent = ac.clearance ? humanize(ac.clearance) : humanize(ac.status || 'airborne');
-    strip.append(title, state, clearance);
+    const selector = document.createElement('span');
+    selector.className = 'strip-selector';
+    selector.textContent = selectedCallsign === ac.callsign ? 'Selected' : 'Select';
+    strip.append(title, state, clearance, selector);
     liveStrips.appendChild(strip);
   });
 }
@@ -606,15 +671,17 @@ function startLiveFrameLoop() {
 
 function populateAircraftSelector(event) {
   const options = Object.keys(event?.state?.aircraft || {});
-  const previous = commandAircraft.value;
-  clearNode(commandAircraft);
-  options.forEach((callsign) => {
-    const node = document.createElement('option');
-    node.value = callsign;
-    node.textContent = callsign;
-    commandAircraft.appendChild(node);
-  });
-  if (options.includes(previous)) commandAircraft.value = previous;
+  if (selectedCallsign && !options.includes(selectedCallsign)) selectedCallsign = null;
+  updateSelectedAircraftCommand();
+}
+
+function selectAircraftForCommand(callsign) {
+  selectedCallsign = callsign || null;
+  updateSelectedAircraftCommand();
+}
+
+function updateSelectedAircraftCommand() {
+  // Keep strip/radar selection for visual focus; typed commands include the callsign.
 }
 
 function sendLiveCommand() {
@@ -630,7 +697,7 @@ function sendLiveCommand() {
     setCommandFeedback(null, 'Command sent. Waiting for controller response.');
     return;
   }
-  const endpoint = (liveEndpointInput.value || '').trim().replace(/\/$/, '');
+  const endpoint = resolveLiveEndpoint().replace(/\/$/, '');
   fetch(`${endpoint}/command`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(envelope) })
     .then(async (res) => {
       const payload = await res.json().catch(() => ({}));
@@ -647,11 +714,21 @@ function sendLiveCommand() {
     });
 }
 
+function resolveLiveEndpoint() {
+  return window.atcLiveEndpoint || DEFAULT_LIVE_ENDPOINT;
+}
+
 function buildLiveCommandEnvelope() {
-  const callsign = (commandAircraft.value || '').trim();
+  const parsed = parseCommandText(commandText.value);
+  if (parsed.ok) {
+    return { ok: true, envelope: { type: 'command', session_id: liveSessionId, command: parsed.command } };
+  }
+  if ((commandText.value || '').trim()) return parsed;
+
+  const callsign = selectedCallsign;
   const actionType = commandType.value;
   const schema = COMMAND_SCHEMA[actionType];
-  if (!callsign) return { ok: false, reason: 'Select a callsign.' };
+  if (!callsign) return { ok: false, reason: 'Select an aircraft from the radar or flight strips.' };
   if (!schema) return { ok: false, reason: 'Select a valid action type.' };
   const command = { aircraft: callsign, type: actionType };
   if (schema.field) {
@@ -666,11 +743,54 @@ function buildLiveCommandEnvelope() {
   return { ok: true, envelope: { type: 'command', session_id: liveSessionId, command } };
 }
 
+function parseCommandText(rawText) {
+  const raw = String(rawText || '').trim();
+  if (!raw) return { ok: false, reason: 'Enter a command.' };
+  const normalized = raw.toUpperCase().replace(/[,:/]+/g, ' ');
+  const tokens = normalized.split(/\s+/).filter(Boolean);
+  const aircraftIds = new Set(Object.keys(traceEvents[currentTickIndex]?.state?.aircraft || {}).map((item) => item.toUpperCase()));
+  const first = tokens[0] || '';
+  const hasExplicitAircraft = aircraftIds.has(first);
+  const aircraft = hasExplicitAircraft ? first : null;
+  const actionTokens = hasExplicitAircraft ? tokens.slice(1) : tokens;
+  if (!aircraft) return { ok: false, reason: 'Start with a callsign.' };
+  if (!actionTokens.length) return { ok: false, reason: 'Enter a command action.' };
+
+  const joined = actionTokens.join(' ');
+  const value = Number(actionTokens.find((token) => /^-?\d+(\.\d+)?$/.test(token)));
+  let type = null;
+  if (/^(NOOP|NO-OP|NONE|NO ACTION)$/.test(joined)) type = 'no_op';
+  else if (/^(HDG|HEADING)\b/.test(joined)) type = 'assign_heading';
+  else if (/^(ALT|ALTITUDE|CLIMB|DESCEND)\b/.test(joined)) type = 'assign_altitude';
+  else if (/^(SPD|SPEED)\b/.test(joined)) type = 'assign_speed';
+  else if (/^(LAND|CLEAR LAND|CLEARED LAND|CLEAR TO LAND)$/.test(joined)) type = 'clear_to_land';
+  else if (/^(TAKEOFF|TAKE OFF|CLEAR TAKEOFF|CLEAR FOR TAKEOFF)$/.test(joined)) type = 'clear_for_takeoff';
+  else if (/^(GA|GO AROUND|GOAROUND)$/.test(joined)) type = 'go_around';
+  else if (/^(HOLD SHORT|SHORT)$/.test(joined)) type = 'hold_short';
+  else if (/^(HOLD|HOLD POS|HOLD POSITION|POSITION)$/.test(joined)) type = 'hold_position';
+  if (!type) return { ok: false, reason: 'Unsupported command action.' };
+
+  const schema = COMMAND_SCHEMA[type];
+  const command = { aircraft, type };
+  if (schema.field) {
+    if (!Number.isFinite(value)) return { ok: false, reason: `Provide ${schema.unitHint}.` };
+    if (value < schema.min || value > schema.max) return { ok: false, reason: `${schema.label} must be ${schema.unitHint}.` };
+    command[schema.field] = value;
+  }
+  return { ok: true, command };
+}
+
 function syncCommandFormForType() {
   const schema = COMMAND_SCHEMA[commandType.value] || { unitHint: null };
   const needsNumeric = Boolean(schema.field);
+  commandValue.closest('.live-command-fields')?.classList.toggle('needs-value', needsNumeric);
+  commandActions.forEach((button) => {
+    button.classList.toggle('selected', button.dataset.commandType === commandType.value);
+  });
   commandValue.disabled = !needsNumeric;
   commandValue.required = needsNumeric;
+  commandValue.hidden = !needsNumeric;
+  if (commandValueLabel) commandValueLabel.hidden = !needsNumeric;
   commandValue.placeholder = schema.unitHint ? `Enter ${schema.unitHint}` : '';
   if (needsNumeric) {
     commandValue.min = String(schema.min);
@@ -684,6 +804,14 @@ function syncCommandFormForType() {
   commandHint.textContent = schema.unitHint
     ? `Value required: ${schema.unitHint}.`
     : 'No extra value required for this command.';
+  if (commandText) commandHint.textContent = 'Type commands like ARR1 HDG 090, ARR2 LAND, or DEP1 TAKEOFF.';
+}
+
+function selectCommandType(actionType) {
+  if (!COMMAND_SCHEMA[actionType]) return;
+  commandType.value = actionType;
+  syncCommandFormForType();
+  setCommandFeedback(null, '');
 }
 
 function extractCommandRejectionReason(payload) {
@@ -739,6 +867,8 @@ async function parseJsonl(file) {
 }
 
 function calculateBounds(events) {
+  const displayCenter = resolveDisplayCenter(events);
+  const defaultRangeNm = resolveDefaultRangeNm(events);
   const aircraft = events.flatMap((event) => Object.values(event.state?.aircraft || {}));
   const surfacePoints = events.flatMap((event) => {
     const airport = event.state?.airport || {};
@@ -749,7 +879,7 @@ function calculateBounds(events) {
     }
     return points;
   });
-  if (!aircraft.length && !surfacePoints.length) return { minX: -10, maxX: 10, minY: -10, maxY: 10 };
+  if (!aircraft.length && !surfacePoints.length) return { minX: -10, maxX: 10, minY: -10, maxY: 10, displayCenter, defaultRangeNm };
   const xs = [...aircraft.map((a) => a.x_nm), ...surfacePoints.map((point) => point.x_nm)];
   const ys = [...aircraft.map((a) => a.y_nm), ...surfacePoints.map((point) => point.y_nm)];
   const minX = Math.min(...xs);
@@ -757,7 +887,37 @@ function calculateBounds(events) {
   const minY = Math.min(...ys);
   const maxY = Math.max(...ys);
   const pad = Math.max(2, (Math.max(maxX - minX, maxY - minY) || 10) * 0.12);
-  return { minX: minX - pad, maxX: maxX + pad, minY: minY - pad, maxY: maxY + pad };
+  return { minX: minX - pad, maxX: maxX + pad, minY: minY - pad, maxY: maxY + pad, displayCenter, defaultRangeNm };
+}
+
+function resolveDefaultRangeNm(events) {
+  for (const event of events) {
+    const range = Number(event.state?.airport?.default_range_nm);
+    if (Number.isFinite(range) && range > 0) return range;
+  }
+  return null;
+}
+
+function resolveDisplayCenter(events) {
+  for (const event of events) {
+    const airport = event.state?.airport || {};
+    if (isWorldPoint(airport.display_center)) return normalizeWorldPoint(airport.display_center);
+  }
+  for (const event of events) {
+    const airport = event.state?.airport || {};
+    if (isWorldPoint(airport.reference_point)) return normalizeWorldPoint(airport.reference_point);
+  }
+  for (const event of events) {
+    const airport = event.state?.airport || {};
+    const runway = findLayoutRunway(airport.layout, airport.active_runway || airport.runway_id);
+    const midpoint = runwayMidpoint(runway?.ends);
+    if (midpoint) return midpoint;
+  }
+  for (const event of events) {
+    const center = pointListCenter(layoutWorldPoints(event.state?.airport?.layout));
+    if (center) return center;
+  }
+  return null;
 }
 
 function renderScenarioSummary() {
@@ -880,17 +1040,21 @@ function aircraftSetFromRecords(records) {
 }
 
 function drawRadar(state, aircraft, conflictSet, predictedSet, conflicts, predictedConflicts) {
+  syncRadarCanvasSize();
   radarTargets = [];
+  const displayTargets = [];
   const view = getViewBounds();
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = '#0f172a';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const width = radarWidth();
+  const height = radarHeight();
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = palette.void;
+  ctx.fillRect(0, 0, width, height);
   drawRadarGrid();
 
   const runway = state.airport?.active_runway || state.airport?.runway_id || 'RWY';
   ctx.fillStyle = palette.text;
-  ctx.font = '600 14px Arial';
-  ctx.fillText(`Runway ${runway}`, 18, 26);
+  ctx.font = '600 12px "JetBrains Mono", "Fira Code", Consolas, monospace';
+  ctx.fillText(`RUNWAY ${runway}`, 18, 25);
   const activeRunwayDrawn = drawAirportLayout(state.airport?.layout, runway);
   if (!activeRunwayDrawn) {
     drawRunway(runway);
@@ -901,8 +1065,8 @@ function drawRadar(state, aircraft, conflictSet, predictedSet, conflicts, predic
   drawConflictLinks(conflicts, byCallsign, palette.conflict, []);
 
   for (const ac of aircraft) {
-    const x = project(ac.x_nm, view.minX, view.maxX, 44, canvas.width - 44);
-    const y = project(ac.y_nm, view.minY, view.maxY, canvas.height - 44, 44);
+    const x = project(ac.x_nm, view.minX, view.maxX, 44, width - 44);
+    const y = project(ac.y_nm, view.minY, view.maxY, height - 44, 44);
     const isLanded = ac.status === 'landed' || ac.status === 'exited_airspace';
     const isSelected = ac.callsign === selectedCallsign;
     const isHovered = ac.callsign === hoveredCallsign;
@@ -910,47 +1074,164 @@ function drawRadar(state, aircraft, conflictSet, predictedSet, conflicts, predic
       ? palette.landed
       : conflictSet.has(ac.callsign)
         ? palette.conflict
-        : predictedSet.has(ac.callsign)
-          ? palette.predicted
-          : ac.emergency
-            ? palette.emergency
-            : palette.normal;
+        : ac.emergency
+          ? palette.emergency
+          : aircraftRoleColor(ac);
+    const role = String(ac.role || '').toLowerCase();
 
     if (isSelected || isHovered) {
-      ctx.strokeStyle = '#f8fafc';
-      ctx.lineWidth = isSelected ? 3 : 2;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = isSelected ? 2 : 1.5;
       ctx.beginPath();
-      ctx.arc(x, y, isSelected ? 12 : 10, 0, Math.PI * 2);
+      ctx.arc(x, y, isSelected ? 13 : 10, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x - 17, y);
+      ctx.lineTo(x - 9, y);
+      ctx.moveTo(x + 9, y);
+      ctx.lineTo(x + 17, y);
+      ctx.moveTo(x, y - 17);
+      ctx.lineTo(x, y - 9);
+      ctx.moveTo(x, y + 9);
+      ctx.lineTo(x, y + 17);
       ctx.stroke();
     }
 
-    ctx.fillStyle = color;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.25;
     ctx.beginPath();
-    ctx.arc(x, y, 7, 0, Math.PI * 2);
+    ctx.arc(x, y, isLanded ? 3.5 : 5, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = isLanded ? color : palette.void;
     ctx.fill();
 
     const headingRad = ((Number(ac.heading_deg || 0) - 90) * Math.PI) / 180;
     ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = conflictSet.has(ac.callsign) ? 2 : 1.5;
     ctx.setLineDash([]);
     ctx.beginPath();
     ctx.moveTo(x, y);
-    ctx.lineTo(x + 20 * Math.cos(headingRad), y + 20 * Math.sin(headingRad));
+    ctx.lineTo(x + 28 * Math.cos(headingRad), y + 28 * Math.sin(headingRad));
     ctx.stroke();
 
-    ctx.fillStyle = palette.text;
-    ctx.font = '12px Arial';
-    ctx.fillText(ac.callsign, x + 10, y - 12);
-    ctx.fillStyle = palette.mutedText;
-    ctx.fillText(`${Math.round(ac.altitude_ft)} ft - ${Math.round(ac.speed_kt)} kt`, x + 10, y + 3);
+    drawAircraftTag(ac, x, y, color, conflictSet.has(ac.callsign), predictedSet.has(ac.callsign));
 
     radarTargets.push({ ac, x, y, conflict: conflictSet.has(ac.callsign), predicted: predictedSet.has(ac.callsign) });
+    displayTargets.push({
+      callsign: String(ac.callsign || 'UNKNOWN').toUpperCase().slice(0, 10),
+      x,
+      y,
+      color,
+      role,
+      roleLabel: role ? role.slice(0, 3).toUpperCase() : 'UNK',
+      altitude: formatFlightLevel(ac.altitude_ft),
+      speed: `${Math.round(Number(ac.speed_kt) || 0)}KT`,
+      heading: `${String(Math.round(Number(ac.heading_deg) || 0)).padStart(3, '0')}H`,
+      headingDeg: Number(ac.heading_deg) || 0,
+      conflict: conflictSet.has(ac.callsign),
+      predicted: predictedSet.has(ac.callsign),
+      selected: isSelected,
+      hovered: isHovered
+    });
   }
 
   if (showPredictionOverlay && selectedCallsign) {
     const selectedAircraft = byCallsign[selectedCallsign];
     if (selectedAircraft) drawPredictionOverlay(state, selectedAircraft);
   }
+  emitRadarFrame({ width, height, runway, targets: displayTargets, conflicts, predictedConflicts });
+}
+
+function emitRadarFrame(frame) {
+  window.dispatchEvent(new CustomEvent('atc:radar-frame', { detail: frame }));
+}
+
+function syncRadarCanvasSize() {
+  const rect = canvas.getBoundingClientRect();
+  if (!rect.width || !rect.height) return false;
+  const dpr = effectiveRadarPixelRatio();
+  const nextWidth = Math.round(rect.width * dpr);
+  const nextHeight = Math.round(rect.height * dpr);
+  if (canvas.width === nextWidth && canvas.height === nextHeight) {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return false;
+  }
+  canvas.width = nextWidth;
+  canvas.height = nextHeight;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return true;
+}
+
+function handleRadarResize() {
+  if (!syncRadarCanvasSize()) return;
+  drawCurrentRadar();
+}
+
+function radarWidth() {
+  return canvas.getBoundingClientRect().width || canvas.width;
+}
+
+function radarHeight() {
+  return canvas.getBoundingClientRect().height || canvas.height;
+}
+
+function effectiveRadarPixelRatio() {
+  const pageRatio = window.devicePixelRatio || 1;
+  const viewportScale = window.visualViewport?.scale || 1;
+  return Math.max(1, Math.min(4, pageRatio * viewportScale));
+}
+
+function aircraftRoleColor(aircraft) {
+  if (String(aircraft.role || '').toLowerCase() === 'departure') return palette.departure;
+  if (String(aircraft.role || '').toLowerCase() === 'arrival') return palette.arrival;
+  return palette.normal;
+}
+
+function drawAircraftTag(aircraft, x, y, color, isConflict, isPredicted) {
+  const role = String(aircraft.role || '').toLowerCase();
+  const isDeparture = role === 'departure';
+  const labelX = isDeparture ? x + 16 : x - 118;
+  const labelY = y - 28;
+  const tagWidth = 102;
+  const tagHeight = 45;
+  const callsign = String(aircraft.callsign || 'UNKNOWN').toUpperCase();
+  const altitude = formatFlightLevel(aircraft.altitude_ft);
+  const speed = `${Math.round(Number(aircraft.speed_kt) || 0)}KT`;
+  const heading = `${String(Math.round(Number(aircraft.heading_deg) || 0)).padStart(3, '0')}H`;
+
+  ctx.save();
+  ctx.font = '600 10px "JetBrains Mono", "Fira Code", Consolas, monospace';
+  ctx.textBaseline = 'top';
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(isDeparture ? labelX - 5 : labelX + tagWidth + 5, labelY + 10);
+  ctx.stroke();
+
+  ctx.fillStyle = 'rgba(3, 5, 6, 0.76)';
+  ctx.fillRect(labelX, labelY, tagWidth, tagHeight);
+  ctx.strokeStyle = isConflict ? palette.conflict : color;
+  ctx.strokeRect(labelX + 0.5, labelY + 0.5, tagWidth - 1, tagHeight - 1);
+
+  ctx.fillStyle = isConflict ? palette.conflict : color;
+  ctx.fillRect(labelX, labelY, 3, tagHeight);
+
+  ctx.fillStyle = isConflict ? '#ffffff' : color;
+  ctx.fillText(callsign.slice(0, 10), labelX + 8, labelY + 5);
+  ctx.fillStyle = isPredicted && !isConflict ? '#dbe8ee' : palette.text;
+  ctx.font = '500 10px "JetBrains Mono", "Fira Code", Consolas, monospace';
+  ctx.fillText(`${altitude}  ${speed}`, labelX + 8, labelY + 19);
+  ctx.fillStyle = palette.mutedText;
+  ctx.fillText(`${heading}  ${role ? role.slice(0, 3).toUpperCase() : 'UNK'}`, labelX + 8, labelY + 32);
+  ctx.restore();
+}
+
+function formatFlightLevel(altitudeFt) {
+  const altitude = Number(altitudeFt);
+  if (!Number.isFinite(altitude)) return 'FL---';
+  if (altitude >= 18000) return `FL${String(Math.round(altitude / 100)).padStart(3, '0')}`;
+  return `${Math.round(altitude)}FT`;
 }
 
 function drawPredictionOverlay(state, aircraft) {
@@ -959,6 +1240,8 @@ function drawPredictionOverlay(state, aircraft) {
   const speedKt = Number(aircraft.speed_kt);
   if (!Number.isFinite(headingDeg) || !Number.isFinite(speedKt)) return;
   const view = getViewBounds();
+  const width = radarWidth();
+  const height = radarHeight();
   const intervalsSec = [60, 120, 180];
   const wind = resolveWindVector(state);
   const points = intervalsSec.map((seconds) => projectAircraftPosition(aircraft, seconds, wind));
@@ -966,12 +1249,12 @@ function drawPredictionOverlay(state, aircraft) {
 
   ctx.save();
   ctx.setLineDash([4, 5]);
-  ctx.strokeStyle = 'rgba(248, 250, 252, 0.8)';
-  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = 'rgba(244, 247, 248, 0.72)';
+  ctx.lineWidth = 1;
   ctx.beginPath();
   all.forEach((point, idx) => {
-    const x = project(point.x_nm, view.minX, view.maxX, 44, canvas.width - 44);
-    const y = project(point.y_nm, view.minY, view.maxY, canvas.height - 44, 44);
+    const x = project(point.x_nm, view.minX, view.maxX, 44, width - 44);
+    const y = project(point.y_nm, view.minY, view.maxY, height - 44, 44);
     if (idx === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   });
@@ -979,14 +1262,14 @@ function drawPredictionOverlay(state, aircraft) {
   ctx.setLineDash([]);
 
   points.forEach((point, idx) => {
-    const x = project(point.x_nm, view.minX, view.maxX, 44, canvas.width - 44);
-    const y = project(point.y_nm, view.minY, view.maxY, canvas.height - 44, 44);
-    ctx.fillStyle = 'rgba(248, 250, 252, 0.95)';
+    const x = project(point.x_nm, view.minX, view.maxX, 44, width - 44);
+    const y = project(point.y_nm, view.minY, view.maxY, height - 44, 44);
+    ctx.fillStyle = 'rgba(244, 247, 248, 0.9)';
     ctx.beginPath();
     ctx.arc(x, y, 2.8, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = 'rgba(248, 250, 252, 0.95)';
-    ctx.font = '11px Arial';
+    ctx.fillStyle = 'rgba(244, 247, 248, 0.9)';
+    ctx.font = '10px "JetBrains Mono", "Fira Code", Consolas, monospace';
     ctx.fillText(`+${idx + 1}m`, x + 6, y - 6);
   });
   ctx.restore();
@@ -1018,18 +1301,20 @@ function resolveWindVector(state) {
 }
 
 function drawRadarGrid() {
-  ctx.strokeStyle = 'rgba(148, 163, 184, 0.16)';
+  const width = radarWidth();
+  const height = radarHeight();
+  ctx.strokeStyle = 'rgba(180, 198, 210, 0.09)';
   ctx.lineWidth = 1;
-  for (let x = 80; x < canvas.width; x += 80) {
+  for (let x = 80; x < width; x += 80) {
     ctx.beginPath();
     ctx.moveTo(x, 0);
-    ctx.lineTo(x, canvas.height);
+    ctx.lineTo(x, height);
     ctx.stroke();
   }
-  for (let y = 80; y < canvas.height; y += 80) {
+  for (let y = 80; y < height; y += 80) {
     ctx.beginPath();
     ctx.moveTo(0, y);
-    ctx.lineTo(canvas.width, y);
+    ctx.lineTo(width, y);
     ctx.stroke();
   }
 }
@@ -1052,20 +1337,20 @@ function drawAirportLayout(layout, activeRunwayId) {
 function drawApron(apron) {
   const polygon = validPointList(apron?.polygon, 3);
   if (!polygon) return;
-  ctx.fillStyle = 'rgba(71, 85, 105, 0.28)';
-  ctx.strokeStyle = 'rgba(148, 163, 184, 0.28)';
+  ctx.fillStyle = 'rgba(80, 96, 105, 0.08)';
+  ctx.strokeStyle = 'rgba(180, 198, 210, 0.14)';
   ctx.lineWidth = 1;
   drawProjectedPath(polygon, true);
-  if (apron.id) drawSurfaceLabel(apron.id, polygon[0], 'rgba(203, 213, 225, 0.72)');
+  if (apron.id) drawSurfaceLabel(apron.id, polygon[0], 'rgba(180, 198, 210, 0.42)');
 }
 
 function drawTaxiway(taxiway) {
   const points = validPointList(taxiway?.points, 2);
   if (!points) return;
   const view = getViewBounds();
-  const scale = Math.min((canvas.width - 88) / (view.maxX - view.minX), (canvas.height - 88) / (view.maxY - view.minY));
-  ctx.strokeStyle = 'rgba(125, 211, 252, 0.38)';
-  ctx.lineWidth = Math.max(2, Math.min(8, Number(taxiway.width_nm || 0.03) * scale));
+  const scale = Math.min((radarWidth() - 88) / (view.maxX - view.minX), (radarHeight() - 88) / (view.maxY - view.minY));
+  ctx.strokeStyle = 'rgba(180, 198, 210, 0.16)';
+  ctx.lineWidth = Math.max(1, Math.min(4, Number(taxiway.width_nm || 0.03) * scale));
   ctx.lineCap = 'round';
   drawProjectedPath(points, false);
   ctx.lineCap = 'butt';
@@ -1080,28 +1365,30 @@ function drawLayoutRunway(runway, isActive) {
 function drawStand(stand) {
   if (!isWorldPoint(stand?.position)) return;
   const view = getViewBounds();
-  const x = project(stand.position.x_nm, view.minX, view.maxX, 44, canvas.width - 44);
-  const y = project(stand.position.y_nm, view.minY, view.maxY, canvas.height - 44, 44);
-  ctx.fillStyle = 'rgba(226, 232, 240, 0.7)';
-  ctx.strokeStyle = 'rgba(15, 23, 42, 0.8)';
+  const x = project(stand.position.x_nm, view.minX, view.maxX, 44, radarWidth() - 44);
+  const y = project(stand.position.y_nm, view.minY, view.maxY, radarHeight() - 44, 44);
+  ctx.fillStyle = 'rgba(180, 198, 210, 0.34)';
+  ctx.strokeStyle = '#0b0f12';
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.arc(x, y, 4, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();
   if (stand.id) {
-    ctx.fillStyle = 'rgba(203, 213, 225, 0.78)';
-    ctx.font = '10px Arial';
+    ctx.fillStyle = 'rgba(180, 198, 210, 0.46)';
+    ctx.font = '9px "JetBrains Mono", "Fira Code", Consolas, monospace';
     ctx.fillText(stand.id, x + 7, y + 4);
   }
 }
 
 function drawProjectedPath(points, closePath) {
   const view = getViewBounds();
+  const width = radarWidth();
+  const height = radarHeight();
   ctx.beginPath();
   points.forEach((point, idx) => {
-    const x = project(point.x_nm, view.minX, view.maxX, 44, canvas.width - 44);
-    const y = project(point.y_nm, view.minY, view.maxY, canvas.height - 44, 44);
+    const x = project(point.x_nm, view.minX, view.maxX, 44, width - 44);
+    const y = project(point.y_nm, view.minY, view.maxY, height - 44, 44);
     if (idx === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   });
@@ -1114,25 +1401,27 @@ function drawProjectedPath(points, closePath) {
 
 function drawSurfaceLabel(label, point, color) {
   const view = getViewBounds();
-  const x = project(point.x_nm, view.minX, view.maxX, 44, canvas.width - 44);
-  const y = project(point.y_nm, view.minY, view.maxY, canvas.height - 44, 44);
+  const x = project(point.x_nm, view.minX, view.maxX, 44, radarWidth() - 44);
+  const y = project(point.y_nm, view.minY, view.maxY, radarHeight() - 44, 44);
   ctx.fillStyle = color;
-  ctx.font = '10px Arial';
+  ctx.font = '9px "JetBrains Mono", "Fira Code", Consolas, monospace';
   ctx.fillText(label, x + 6, y - 6);
 }
 
 function drawRunway(runwayId, points = runwayWorldPoints(runwayId), widthNm = null, isActive = true) {
   if (!Array.isArray(points) || points.length < 2) return;
   const view = getViewBounds();
+  const canvasWidth = radarWidth();
+  const canvasHeight = radarHeight();
   const start = points[0];
   const end = points[1];
-  const x1 = project(start.x_nm, view.minX, view.maxX, 44, canvas.width - 44);
-  const y1 = project(start.y_nm, view.minY, view.maxY, canvas.height - 44, 44);
-  const x2 = project(end.x_nm, view.minX, view.maxX, 44, canvas.width - 44);
-  const y2 = project(end.y_nm, view.minY, view.maxY, canvas.height - 44, 44);
+  const x1 = project(start.x_nm, view.minX, view.maxX, 44, canvasWidth - 44);
+  const y1 = project(start.y_nm, view.minY, view.maxY, canvasHeight - 44, 44);
+  const x2 = project(end.x_nm, view.minX, view.maxX, 44, canvasWidth - 44);
+  const y2 = project(end.y_nm, view.minY, view.maxY, canvasHeight - 44, 44);
   const lengthPx = Math.hypot(x2 - x1, y2 - y1);
   if (!lengthPx) return;
-  const scale = Math.min((canvas.width - 88) / (view.maxX - view.minX), (canvas.height - 88) / (view.maxY - view.minY));
+  const scale = Math.min((canvasWidth - 88) / (view.maxX - view.minX), (canvasHeight - 88) / (view.maxY - view.minY));
   const width = _isFinitePositive(widthNm)
     ? Math.max(4, Math.min(20, (Number(widthNm) * scale) / 2))
     : Math.max(8, Math.min(18, lengthPx * 0.05));
@@ -1141,9 +1430,9 @@ function drawRunway(runwayId, points = runwayWorldPoints(runwayId), widthNm = nu
   const px = -dy;
   const py = dx;
 
-  ctx.fillStyle = isActive ? 'rgba(148, 163, 184, 0.16)' : 'rgba(100, 116, 139, 0.12)';
-  ctx.strokeStyle = isActive ? 'rgba(226, 232, 240, 0.62)' : 'rgba(148, 163, 184, 0.34)';
-  ctx.lineWidth = 2;
+  ctx.fillStyle = isActive ? 'rgba(180, 198, 210, 0.08)' : 'rgba(100, 116, 139, 0.05)';
+  ctx.strokeStyle = isActive ? 'rgba(222, 234, 240, 0.4)' : 'rgba(148, 163, 184, 0.18)';
+  ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(x1 + px * width, y1 + py * width);
   ctx.lineTo(x2 + px * width, y2 + py * width);
@@ -1154,8 +1443,8 @@ function drawRunway(runwayId, points = runwayWorldPoints(runwayId), widthNm = nu
   ctx.stroke();
 
   if (lengthPx > 90) {
-    ctx.strokeStyle = isActive ? 'rgba(248, 250, 252, 0.68)' : 'rgba(203, 213, 225, 0.42)';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = isActive ? 'rgba(244, 247, 248, 0.42)' : 'rgba(203, 213, 225, 0.2)';
+    ctx.lineWidth = 1;
     ctx.setLineDash([18, 12]);
     ctx.beginPath();
     ctx.moveTo(x1 + dx * 20, y1 + dy * 20);
@@ -1164,8 +1453,8 @@ function drawRunway(runwayId, points = runwayWorldPoints(runwayId), widthNm = nu
     ctx.setLineDash([]);
   }
 
-  ctx.strokeStyle = isActive ? '#f8fafc' : 'rgba(203, 213, 225, 0.5)';
-  ctx.lineWidth = 4;
+  ctx.strokeStyle = isActive ? 'rgba(244, 247, 248, 0.72)' : 'rgba(203, 213, 225, 0.3)';
+  ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(x1 + px * width * 0.8, y1 + py * width * 0.8);
   ctx.lineTo(x1 - px * width * 0.8, y1 - py * width * 0.8);
@@ -1173,8 +1462,8 @@ function drawRunway(runwayId, points = runwayWorldPoints(runwayId), widthNm = nu
   ctx.lineTo(x2 - px * width * 0.8, y2 - py * width * 0.8);
   ctx.stroke();
 
-  ctx.fillStyle = isActive ? '#f8fafc' : 'rgba(203, 213, 225, 0.62)';
-  ctx.font = '700 12px Arial';
+  ctx.fillStyle = isActive ? '#f4f7f8' : 'rgba(203, 213, 225, 0.46)';
+  ctx.font = '700 11px "JetBrains Mono", "Fira Code", Consolas, monospace';
   ctx.textAlign = 'center';
   ctx.fillText(runwayId, x1 - dx * 16, y1 - dy * 16);
   ctx.fillText(oppositeRunway(runwayId), x2 + dx * 16, y2 + dy * 16);
@@ -1196,6 +1485,31 @@ function layoutWorldPoints(layout) {
 function findLayoutRunway(layout, runwayId) {
   if (!layout || !Array.isArray(layout.runways)) return null;
   return layout.runways.find((runway) => runway?.id === runwayId && validPointList(runway.ends, 2, true)) || null;
+}
+
+function runwayMidpoint(points) {
+  const valid = validPointList(points, 2, true);
+  if (!valid) return null;
+  return {
+    x_nm: (Number(valid[0].x_nm) + Number(valid[1].x_nm)) / 2,
+    y_nm: (Number(valid[0].y_nm) + Number(valid[1].y_nm)) / 2
+  };
+}
+
+function pointListCenter(points) {
+  if (!Array.isArray(points) || !points.length) return null;
+  const valid = points.filter(isWorldPoint);
+  if (!valid.length) return null;
+  const xs = valid.map((point) => Number(point.x_nm));
+  const ys = valid.map((point) => Number(point.y_nm));
+  return {
+    x_nm: (Math.min(...xs) + Math.max(...xs)) / 2,
+    y_nm: (Math.min(...ys) + Math.max(...ys)) / 2
+  };
+}
+
+function normalizeWorldPoint(point) {
+  return { x_nm: Number(point.x_nm), y_nm: Number(point.y_nm) };
 }
 
 function validPointList(points, minimum, exact = false) {
@@ -1245,8 +1559,10 @@ function oppositeRunway(runwayId) {
 
 function drawConflictLinks(records, byCallsign, color, dash) {
   const view = getViewBounds();
+  const width = radarWidth();
+  const height = radarHeight();
   ctx.strokeStyle = color;
-  ctx.lineWidth = 2;
+  ctx.lineWidth = dash?.length ? 1 : 2;
   ctx.setLineDash(dash);
   for (const record of records) {
     if (!Array.isArray(record.aircraft) || record.aircraft.length < 2) continue;
@@ -1254,8 +1570,8 @@ function drawConflictLinks(records, byCallsign, color, dash) {
     const b = byCallsign[record.aircraft[1]];
     if (!a || !b) continue;
     ctx.beginPath();
-    ctx.moveTo(project(a.x_nm, view.minX, view.maxX, 44, canvas.width - 44), project(a.y_nm, view.minY, view.maxY, canvas.height - 44, 44));
-    ctx.lineTo(project(b.x_nm, view.minX, view.maxX, 44, canvas.width - 44), project(b.y_nm, view.minY, view.maxY, canvas.height - 44, 44));
+    ctx.moveTo(project(a.x_nm, view.minX, view.maxX, 44, width - 44), project(a.y_nm, view.minY, view.maxY, height - 44, 44));
+    ctx.lineTo(project(b.x_nm, view.minX, view.maxX, 44, width - 44), project(b.y_nm, view.minY, view.maxY, height - 44, 44));
     ctx.stroke();
   }
   ctx.setLineDash([]);
@@ -1264,11 +1580,11 @@ function drawConflictLinks(records, byCallsign, color, dash) {
 function renderRadarLegend() {
   clearNode(radarLegend);
   [
-    ['Normal aircraft', palette.normal, 'Aircraft without a conflict or emergency flag.'],
+    ['Arrivals', palette.arrival, 'Inbound aircraft and approach vectors.'],
+    ['Departures', palette.departure, 'Outbound aircraft and departure vectors.'],
     ['Emergency', palette.emergency, 'Aircraft requiring priority handling.'],
-    ['Predicted conflict', palette.predicted, 'Aircraft that may become too close soon.'],
-    ['Active conflict', palette.conflict, 'Aircraft that are too close now.'],
-    ['Landed or exited', palette.landed, 'Aircraft no longer active in the airspace.']
+    ['Predicted', palette.predicted, 'Aircraft that may become too close soon.'],
+    ['Conflict', palette.conflict, 'Aircraft that are too close now.']
   ].forEach(([label, color, help]) => {
     const item = document.createElement('span');
     item.className = 'legend-item';
@@ -1284,30 +1600,42 @@ function renderRadarLegend() {
 function handleRadarMove(event) {
   if (isPanning) return;
   if (!radarTargets.length) return;
-  const rect = canvas.getBoundingClientRect();
-  const scaleX = canvas.width / rect.width;
-  const scaleY = canvas.height / rect.height;
-  const x = (event.clientX - rect.left) * scaleX;
-  const y = (event.clientY - rect.top) * scaleY;
-  const target = radarTargets.find((item) => Math.hypot(item.x - x, item.y - y) <= 14);
+  const point = radarPointFromEvent(event);
+  const target = point ? hitTestRadarTarget(point.x, point.y) : null;
   hoveredCallsign = target?.ac.callsign || null;
   drawCurrentRadar();
   if (!target) {
     hideRadarTooltip();
     return;
   }
+  const rect = canvas.getBoundingClientRect();
   radarTooltip.hidden = false;
   radarTooltip.style.left = `${event.clientX - rect.left + 14}px`;
   radarTooltip.style.top = `${event.clientY - rect.top + 14}px`;
   radarTooltip.innerHTML = renderAircraftTooltip(target);
 }
 
-function handleRadarClick() {
+function handleRadarClick(event) {
   if (isPanning) return;
-  if (!hoveredCallsign) return;
-  selectedCallsign = hoveredCallsign;
+  const point = radarPointFromEvent(event);
+  const target = point ? hitTestRadarTarget(point.x, point.y) : radarTargets.find((item) => item.ac.callsign === hoveredCallsign);
+  const nextCallsign = target?.ac.callsign || null;
+  selectAircraftForCommand(nextCallsign === selectedCallsign ? null : nextCallsign);
   drawCurrentRadar();
   renderAircraftPanel(traceEvents[currentTickIndex], selectedCallsign);
+}
+
+function radarPointFromEvent(event) {
+  if (!event || typeof event.clientX !== 'number' || typeof event.clientY !== 'number') return null;
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: event.clientX - rect.left,
+    y: event.clientY - rect.top
+  };
+}
+
+function hitTestRadarTarget(x, y) {
+  return radarTargets.find((item) => Math.hypot(item.x - x, item.y - y) <= 14) || null;
 }
 
 function hideRadarTooltip() {
@@ -1368,21 +1696,15 @@ function lerpHeading(a, b, alpha) {
   return (from + delta * alpha + 360) % 360;
 }
 
-function startRadarPan(event) {
-  if (!traceEvents.length || event.button !== 0) return;
-  isPanning = true;
-  lastPanPoint = { x: event.clientX, y: event.clientY };
-  canvas.classList.add('is-panning');
-  hideRadarTooltip();
-}
+function startRadarPan() {}
 
 function panRadar(event) {
   if (!isPanning || !radarView || !lastPanPoint) return;
   const view = getViewBounds();
   const dx = event.clientX - lastPanPoint.x;
   const dy = event.clientY - lastPanPoint.y;
-  const worldPerPxX = (view.maxX - view.minX) / (canvas.width - 88);
-  const worldPerPxY = (view.maxY - view.minY) / (canvas.height - 88);
+  const worldPerPxX = (view.maxX - view.minX) / (radarWidth() - 88);
+  const worldPerPxY = (view.maxY - view.minY) / (radarHeight() - 88);
   radarView.centerX -= dx * worldPerPxX;
   radarView.centerY += dy * worldPerPxY;
   lastPanPoint = { x: event.clientX, y: event.clientY };
@@ -1399,37 +1721,41 @@ function stopRadarPan() {
 function handleRadarWheel(event) {
   if (!traceEvents.length) return;
   event.preventDefault();
-  const factor = event.deltaY < 0 ? 1.18 : 1 / 1.18;
-  zoomRadar(factor, event);
 }
 
-function zoomRadar(factor, pointerEvent = null) {
-  if (!radarView) return;
-  const oldView = getViewBounds();
-  const pointBefore = pointerEvent ? screenToWorld(pointerEvent, oldView) : null;
-  radarView.zoom = Math.max(0.65, Math.min(16, radarView.zoom * factor));
-  if (pointBefore && pointerEvent) {
-    const newView = getViewBounds();
-    const pointAfter = screenToWorld(pointerEvent, newView);
-    radarView.centerX += pointBefore.x - pointAfter.x;
-    radarView.centerY += pointBefore.y - pointAfter.y;
-  }
-  drawCurrentRadar();
+function handleRadarScopeButton(direction) {
+  setRadarScopeRange(direction === 'in' ? 80 : 40);
 }
 
-function resetRadarView(redraw = true) {
+function setRadarScopeRange(rangeNm) {
+  radarScopeRangeNm = rangeNm;
+  resetScopeView(true);
+}
+
+function resetScopeView(redraw = true) {
   if (!radarBounds) return;
+  const center = radarBounds.displayCenter || {
+    x_nm: (radarBounds.minX + radarBounds.maxX) / 2,
+    y_nm: (radarBounds.minY + radarBounds.maxY) / 2
+  };
   radarView = {
-    centerX: (radarBounds.minX + radarBounds.maxX) / 2,
-    centerY: (radarBounds.minY + radarBounds.maxY) / 2,
-    zoom: 1
+    centerX: center.x_nm,
+    centerY: center.y_nm,
+    zoom: zoomForScopeRange(radarScopeRangeNm)
   };
   if (redraw) drawCurrentRadar();
 }
 
+function zoomForScopeRange(rangeNm) {
+  const boundsWidth = Math.max(1, radarBounds.maxX - radarBounds.minX);
+  const boundsHeight = Math.max(1, radarBounds.maxY - radarBounds.minY);
+  const boundsSpan = Math.max(boundsWidth, boundsHeight);
+  return Math.max(0.65, Math.min(16, boundsSpan / Math.max(1, rangeNm)));
+}
+
 function getViewBounds() {
   if (!radarBounds) return { minX: -10, maxX: 10, minY: -10, maxY: 10 };
-  if (!radarView) resetRadarView(false);
+  if (!radarView) resetScopeView(false);
   const width = (radarBounds.maxX - radarBounds.minX) / radarView.zoom;
   const height = (radarBounds.maxY - radarBounds.minY) / radarView.zoom;
   return {
@@ -1437,16 +1763,6 @@ function getViewBounds() {
     maxX: radarView.centerX + width / 2,
     minY: radarView.centerY - height / 2,
     maxY: radarView.centerY + height / 2
-  };
-}
-
-function screenToWorld(event, view) {
-  const rect = canvas.getBoundingClientRect();
-  const x = (event.clientX - rect.left) * (canvas.width / rect.width);
-  const y = (event.clientY - rect.top) * (canvas.height / rect.height);
-  return {
-    x: unproject(x, view.minX, view.maxX, 44, canvas.width - 44),
-    y: unproject(y, view.minY, view.maxY, canvas.height - 44, 44)
   };
 }
 
@@ -1470,17 +1786,31 @@ function renderAircraftPanel(event, callsign) {
   }
   const conflictSet = aircraftSetFromRecords(event.conflicts || []);
   const predictedSet = aircraftSetFromRecords(event.predicted_conflicts || []);
-  appendText(aircraftPanel, 'h3', ac.callsign);
-  appendDefinitionList(aircraftPanel, {
-    Role: humanize(ac.role || 'aircraft'),
-    Status: humanize(ac.status || 'unknown'),
-    Altitude: `${Math.round(ac.altitude_ft)} ft`,
-    Speed: `${Math.round(ac.speed_kt)} kt`,
-    Heading: `${Math.round(ac.heading_deg)} degrees`,
-    Clearance: ac.clearance ? humanize(ac.clearance) : 'None',
-    Emergency: ac.emergency ? 'Yes' : 'No',
-    Conflict: conflictSet.has(callsign) ? 'Active now' : predictedSet.has(callsign) ? 'Predicted soon' : 'None detected'
-  });
+  const conflictState = conflictSet.has(callsign) ? 'Active conflict' : predictedSet.has(callsign) ? 'Predicted conflict' : 'Nominal';
+  const alertClass = conflictSet.has(callsign) ? 'critical' : predictedSet.has(callsign) || ac.emergency ? 'warn' : 'nominal';
+  const roleClass = String(ac.role || '').toLowerCase() === 'departure' ? 'departure' : 'arrival';
+  const card = document.createElement('div');
+  card.className = `aircraft-glance ${roleClass} ${alertClass}`;
+  card.innerHTML = `
+    <div class="aircraft-glance-head">
+      <div>
+        <b>${escapeHtml(ac.callsign)}</b>
+        <span>${escapeHtml(humanize(ac.role || 'aircraft'))} / ${escapeHtml(humanize(ac.status || 'unknown'))}</span>
+      </div>
+      <em>${escapeHtml(conflictState)}</em>
+    </div>
+    <div class="aircraft-glance-metrics">
+      <span><small>Alt</small><b>${Math.round(ac.altitude_ft)}</b><small>FT</small></span>
+      <span><small>Spd</small><b>${Math.round(ac.speed_kt)}</b><small>KT</small></span>
+      <span><small>Hdg</small><b>${Math.round(ac.heading_deg)}</b><small>DEG</small></span>
+    </div>
+    <div class="aircraft-glance-tags">
+      <span>${escapeHtml(ac.clearance ? humanize(ac.clearance) : 'No clearance')}</span>
+      <span>${ac.emergency ? 'Emergency' : 'No emergency'}</span>
+      <span>${escapeHtml(conflictState)}</span>
+    </div>
+  `;
+  aircraftPanel.appendChild(card);
 }
 
 function renderTickDetails(e) {
@@ -1730,6 +2060,7 @@ function togglePlayback() {
   if (currentMode === 'live') {
     liveFollowTail = !liveFollowTail;
     if (liveFollowTail && traceEvents.length) renderAtTick(traceEvents.length - 1);
+    if (liveFollowTail) resetScopeView(true);
     syncPlaybackButton();
     loadStatus.textContent = liveFollowTail
       ? 'Live playback resumed at the newest tick.'
@@ -1741,14 +2072,15 @@ function togglePlayback() {
 }
 
 function resetTimelineOrView() {
-  resetRadarView(false);
   if (currentMode === 'live' && traceEvents.length) {
-    liveFollowTail = false;
-    renderAtTick(0);
+    liveFollowTail = true;
+    resetScopeView(false);
+    renderAtTick(traceEvents.length - 1);
     syncPlaybackButton();
-    loadStatus.textContent = 'Live replay reset to the first buffered tick.';
+    loadStatus.textContent = 'Live scope returned to the latest traffic.';
     return;
   }
+  resetScopeView(false);
   drawCurrentRadar();
 }
 

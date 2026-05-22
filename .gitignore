@@ -5,3 +5,5 @@ test-results
 outputs
 atc-benchmark/outputs
 atc-benchmark/src/atc_benchmark.egg-info
+images
+viewer/dist
