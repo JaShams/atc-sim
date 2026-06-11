@@ -25,10 +25,14 @@ class LiveTransportServer:
     def __init__(self) -> None:
         self._subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
         self._latest_tick_envelope: dict[str, Any] | None = None
+        self._latest_level_envelope: dict[str, Any] | None = None
 
     async def subscribe_tick_stream(self) -> asyncio.Queue[dict[str, Any]]:
+        """Subscribe and replay current session state (active level + latest tick)."""
         queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._subscribers.add(queue)
+        if self._latest_level_envelope is not None:
+            await queue.put(self._latest_level_envelope)
         if self._latest_tick_envelope is not None:
             await queue.put(self._latest_tick_envelope)
         return queue
@@ -37,8 +41,17 @@ class LiveTransportServer:
         self._subscribers.discard(queue)
 
     async def publish_envelope(self, envelope: dict[str, Any]) -> None:
-        if envelope.get("type") == "tick":
+        envelope_type = envelope.get("type")
+        if envelope_type == "tick":
             self._latest_tick_envelope = envelope
+        elif envelope_type == "level_started":
+            self._latest_level_envelope = envelope
+            self._latest_tick_envelope = None
+        elif envelope_type == "level_complete":
+            # The level is over: late joiners should land in the lobby, not on
+            # a stale running level.
+            self._latest_level_envelope = None
+            self._latest_tick_envelope = None
         for subscriber in list(self._subscribers):
             await subscriber.put(envelope)
 
@@ -117,7 +130,7 @@ def create_live_asgi_app(live_server: LiveTransportServer, *, on_command: Comman
                     queue = await live_server.subscribe_tick_stream()
                     forward_task = asyncio.create_task(forward_ticks(queue))
                     continue
-                if payload.get("type") in {"command", "pause", "resume", "reset", "end_session"} and on_command is not None:
+                if payload.get("type") in {"command", "pause", "resume", "reset", "end_session", "list_levels", "start_level"} and on_command is not None:
                     response = on_command(payload)
                     if asyncio.iscoroutine(response):
                         response = await response

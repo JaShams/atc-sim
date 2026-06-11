@@ -61,15 +61,17 @@ cd atc-benchmark
 pip install -e ".[dev,live]"
 ```
 
-Start a live scenario server:
+Start the live game server (the scenario argument is optional — without it the server starts in the lobby and the viewer offers a level-select screen):
 
 ```bash
+atc-live --host 127.0.0.1 --port 8080
+# or jump straight into one level:
 atc-live scenarios/crossing_conflict_001.json --host 127.0.0.1 --port 8080
 ```
 
-Open `viewer/index.html`, switch the mode dropdown to `Live mode`, keep the endpoint as `ws://localhost:8080/live`, and click `Connect`. The viewer streams simulator ticks and sends live commands back over the same websocket.
+Run the viewer with `npm run dev`, switch to `Live mode`, keep the endpoint as `ws://localhost:8080/live`, and click `Start`. Pick a level from the lobby; the viewer streams simulator ticks and sends commands back over the same websocket.
 
-Live sessions use the same simulation semantics as batch runs: commands are acknowledged immediately but execute at the next tick (plus any scenario-configured pilot readback delay), emergencies and restricted zones progress in real time, and every tick carries a `running_score`. When the session ends — all traffic handled, ended by the user, or the tick budget runs out — the server publishes a final score (`level_complete` with an `outcome` field) and writes per-session `trace.jsonl` and `score.json` artifacts under `--output-dir` (default `outputs/live`), so finished live games can be reloaded in replay mode.
+Live sessions use the same simulation semantics as batch runs: commands are acknowledged immediately but execute at the next tick (plus any scenario-configured pilot readback delay), emergencies and restricted zones progress in real time, and every tick carries a `running_score`. A level ends when all traffic is handled, an aircraft is lost (immediate game over), the player ends the session (forfeits, `abandoned`), or the tick budget runs out. The server then publishes `level_complete` with the final score, a mission debrief, and a 0-3 star rating, and writes per-session `trace.jsonl` and `score.json` artifacts under `--output-dir` (default `outputs/live`). The viewer shows the debrief with play-again / watch-replay / choose-level actions, tracks best scores per level locally, and can reload the last finished game from the replay screen.
 
 ## Local Checks
 

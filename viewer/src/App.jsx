@@ -217,6 +217,9 @@ function FileControls({ state }) {
         Score JSON
         <input aria-label="Score JSON" type="file" accept=".json,application/json" onChange={(event) => state.loadScoreFile(event.target.files?.[0])} />
       </label>
+      <button type="button" disabled={!state.hasSavedRun} title="Reload the most recent finished live game" onClick={state.loadLastRun}>
+        Load last run
+      </button>
     </section>
   );
 }
@@ -660,7 +663,7 @@ function TimelinePanel({ state, embedded = false }) {
       if (state.filterHurt && outcome !== 'hurt') return;
       if (state.filterSafety && !isSafetyTriggeredCall(event, explanation)) return;
       if (state.filterLargeDelta && Math.abs(immediateDelta) < 0.05) return;
-      const rowKey = `${event.session_id || 'trace'}-${event.tick_id ?? event.time ?? primaryReason(event)}`;
+      const rowKey = `${event.session_id || 'trace'}-${event.tick_id ?? event.time ?? primaryReason(event)}-${index}`;
       filteredRows.push({ event, index, explanation, componentTotals: previousTotals, rowKey });
     });
     return filteredRows;
@@ -804,12 +807,115 @@ function ReplaySidebar({ state, event }) {
   );
 }
 
+function Stars({ count, max = 3 }) {
+  return (
+    <span className="stars" aria-label={`${count} of ${max} stars`}>
+      {Array.from({ length: max }, (_, idx) => (
+        <span key={idx} className={idx < count ? 'star earned' : 'star'} aria-hidden="true">
+          {idx < count ? '★' : '☆'}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function LevelSelect({ state }) {
+  const showLobby = state.liveConnectionState
+    && !state.debrief
+    && !state.currentLevel
+    && state.traceEvents.length === 0;
+  if (!showLobby) return null;
+  return (
+    <section className="level-select-panel overlay-panel" aria-label="Level select">
+      <SectionHeading eyebrow="Tower" title="Choose a Level" />
+      {!state.levels && <p className="muted">Loading levels…</p>}
+      {state.levels && !state.levels.length && <p className="muted">No scenarios found on the server.</p>}
+      <div className="level-grid">
+        {(state.levels || []).map((level) => {
+          const best = state.bestResults[level.id];
+          return (
+            <button
+              key={level.id}
+              type="button"
+              className="level-card"
+              onClick={() => state.startLevel(level.id)}
+            >
+              <span className="level-card-head">
+                <b>{level.name}</b>
+                {level.difficulty_tier && <span className="chip">{humanize(level.difficulty_tier)}</span>}
+              </span>
+              <span className="level-card-traffic">
+                {countPhrase(level.arrivals ?? 0, 'arrival')} · {countPhrase(level.departures ?? 0, 'departure')}
+                {level.has_events ? ' · scripted events' : ''}
+              </span>
+              {(level.tags || []).length > 0 && (
+                <span className="level-card-tags">{level.tags.slice(0, 3).map(humanize).join(', ')}</span>
+              )}
+              <span className="level-card-best">
+                {best ? (
+                  <>
+                    <Stars count={best.stars ?? 0} />
+                    <span>Best {formatNum(best.bestScore)}</span>
+                  </>
+                ) : (
+                  <span className="muted">Not played yet</span>
+                )}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function DebriefOverlay({ state }) {
+  const debrief = state.debrief;
+  if (!debrief) return null;
+  const verdict = debrief.debrief?.outcome || debrief.outcome || 'complete';
+  const scoreValue = Number(debrief.score?.score ?? 0);
+  const breakdown = Object.entries(debrief.score?.score_breakdown || {}).filter(([, value]) => Number(value) !== 0);
+  const details = debrief.debrief?.details || [];
+  return (
+    <div className="debrief-overlay" role="dialog" aria-label="Mission debrief">
+      <article className={`debrief-card outcome-${verdict}`}>
+        <p className="eyebrow">Mission debrief</p>
+        <h2>{humanize(verdict)}</h2>
+        <Stars count={debrief.stars ?? 0} />
+        <div className="debrief-score">
+          <span>Final score</span>
+          <b>{formatNum(scoreValue)}</b>
+        </div>
+        {details.length > 0 && (
+          <ul className="debrief-details">
+            {details.map((line) => <li key={line}>{line}</li>)}
+          </ul>
+        )}
+        {breakdown.length > 0 && (
+          <ul className="debrief-breakdown">
+            {breakdown.map(([key, value]) => (
+              <li key={key}><b>{humanizeLabel(key)}</b>: {formatSigned(Number(value))}</li>
+            ))}
+          </ul>
+        )}
+        <div className="debrief-actions">
+          <button type="button" onClick={() => state.startLevel(debrief.scenario)}>Play again</button>
+          <button type="button" onClick={state.watchReplay}>Watch replay</button>
+          <button type="button" onClick={state.returnToLevelSelect}>Choose level</button>
+        </div>
+      </article>
+    </div>
+  );
+}
+
 function LiveLayout({ state, event }) {
   return (
     <section className="live-overlay-layer workspace-overlay" aria-label="Live mode workspace">
       <LiveSessionControls state={state} />
       <LiveDashboard state={state} event={event} />
       <LiveRadarControls state={state} />
+      <LevelSelect state={state} />
+      <DebriefOverlay state={state} />
     </section>
   );
 }
