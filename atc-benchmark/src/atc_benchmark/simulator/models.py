@@ -35,6 +35,7 @@ class Aircraft:
     target_runway: str | None = None
     clearance: str | None = None
     target_altitude_ft: float | None = None
+    target_heading_deg: float | None = None
     emergency: bool = False
     ready_time_sec: int | None = None
     takeoff_time_sec: int | None = None
@@ -127,6 +128,7 @@ class ScoringConfig:
     emergency_priority_compliance_reward: float = 2.5
     emergency_priority_violation_penalty: float = -4.0
     restricted_zone_violation_penalty: float = -10.0
+    runway_incursion_penalty: float = -15.0
 
 
 @dataclass

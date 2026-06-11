@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from math import cos, hypot, radians, sin
-from typing import Any, Mapping
+from typing import Any
 
 from .models import WorldState
 from .spatial_index import SpatialHashIndex
@@ -158,9 +159,12 @@ def _candidate_pairs(aircraft: list, horizontal_gate_nm: float):
         index.insert(ac.x_nm, ac.y_nm, ac)
 
 
+CONFLICT_RELEVANT_STATUSES = {"airborne", "on_final", "go_around", "rolling", "airborne_departure", "holding"}
+
+
 def detect_conflicts(world: WorldState) -> list[dict]:
     conflicts: list[dict] = []
-    ac_list = [a for a in world.aircraft.values() if a.status in {"airborne", "on_final", "go_around", "rolling", "airborne_departure"}]
+    ac_list = [a for a in world.aircraft.values() if a.status in CONFLICT_RELEVANT_STATUSES]
     for a, b in _candidate_pairs(ac_list, world.rules.min_horizontal_nm):
         h = horizontal_distance_nm(a, b)
         v = abs(a.altitude_ft - b.altitude_ft)
@@ -186,7 +190,7 @@ def detect_conflicts(world: WorldState) -> list[dict]:
 
 def predict_conflicts(world: WorldState) -> list[dict]:
     predictions: list[dict] = []
-    ac_list = [a for a in world.aircraft.values() if a.status in {"airborne", "on_final", "go_around", "rolling", "airborne_departure"}]
+    ac_list = [a for a in world.aircraft.values() if a.status in CONFLICT_RELEVANT_STATUSES]
     step = max(world.tick_sec, 1)
     candidate_pairs = list(_candidate_pairs(ac_list, world.rules.min_horizontal_nm))
     for a, b in candidate_pairs:

@@ -1,6 +1,5 @@
 
 from itertools import combinations
-from math import hypot
 
 from atc_benchmark.paths import resolve_scenario_path
 from atc_benchmark.simulator.conflict_detection import _candidate_pairs, detect_conflicts, predict_conflicts

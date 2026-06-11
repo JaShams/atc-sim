@@ -29,8 +29,6 @@ TAKEOFF_RUNWAY_OCCUPANCY_SEC = 35
 LANDING_RUNWAY_OCCUPANCY_SEC = 50
 
 AIRBORNE_DELAYED_ACTION_TYPES = {"assign_heading", "assign_altitude", "assign_speed", "clear_to_land", "go_around"}
-# Exempt actions are executed immediately to preserve safety-critical runway occupancy state transitions.
-IMMEDIATE_ACTION_EXEMPT_TYPES = {"clear_for_takeoff", "hold_short", "hold_position", "no_op"}
 
 
 def _runway_heading_deg(runway_id: str) -> float:
@@ -156,11 +154,29 @@ def _named_fix_lookup(world: WorldState) -> dict[str, tuple[float, float]]:
     return fixes
 
 
-def advance(world: WorldState) -> None:
+def _turn_toward_target_heading(world: WorldState, ac: Aircraft) -> None:
+    if ac.target_heading_deg is None or ac.hold_fix_id is not None:
+        return
+    if ac.max_turn_rate_deg_per_sec is None:
+        ac.heading_deg = ac.target_heading_deg % 360
+        ac.target_heading_deg = None
+        return
+    max_delta = ac.max_turn_rate_deg_per_sec * world.tick_sec
+    delta = ((ac.target_heading_deg - ac.heading_deg + 180) % 360) - 180
+    if abs(delta) <= max_delta:
+        ac.heading_deg = ac.target_heading_deg % 360
+        ac.target_heading_deg = None
+    else:
+        ac.heading_deg = (ac.heading_deg + math.copysign(max_delta, delta)) % 360
+
+
+def advance(world: WorldState) -> list[dict]:
+    events: list[dict] = []
     dt_hr = world.tick_sec / 3600
     for ac in world.aircraft.values():
         _update_managed_route(world, ac)
         if ac.status in {"airborne", "on_final", "go_around", "rolling", "airborne_departure", "holding"}:
+            _turn_toward_target_heading(world, ac)
             rad = math.radians(ac.heading_deg)
             wind_to_deg = (world.weather.wind_dir_deg + 180) % 360
             wind_rad = math.radians(wind_to_deg)
@@ -206,7 +222,22 @@ def advance(world: WorldState) -> None:
                     ac.altitude_ft = ac.target_altitude_ft
                     ac.vertical_rate_fpm = 0
                     ac.target_altitude_ft = None
-            if ac.role == "arrival" and abs(ac.x_nm) < 1.5 and abs(ac.y_nm) < 1.5 and ac.altitude_ft < 300:
+            if (
+                ac.role == "arrival"
+                and ac.clearance == "cleared_to_land"
+                and abs(ac.x_nm) < 1.5
+                and abs(ac.y_nm) < 1.5
+                and ac.altitude_ft < 300
+            ):
+                occupant = world.airport.runway_occupied_by
+                if occupant is not None and occupant != ac.callsign:
+                    events.append({
+                        "type": "runway_incursion",
+                        "time_sec": world.time_sec + world.tick_sec,
+                        "aircraft": ac.callsign,
+                        "occupied_by": occupant,
+                        "runway": world.airport.active_runway,
+                    })
                 ac.status = "landed"
                 ac.landing_time_sec = world.time_sec + world.tick_sec
                 world.airport.runway_occupied_by = ac.callsign
@@ -217,6 +248,7 @@ def advance(world: WorldState) -> None:
                 ac.takeoff_time_sec = world.time_sec + world.tick_sec
         if ac.status == "airborne_departure" and (abs(ac.x_nm) > 30 or abs(ac.y_nm) > 30):
             ac.status = "exited_airspace"
+    return events
 
 
 def _update_managed_route(world: WorldState, ac: Aircraft) -> None:
@@ -292,18 +324,18 @@ def apply_actions(world: WorldState, actions: list[dict]) -> dict:
     go_arounds = 0
     fix_lookup = _named_fix_lookup(world)
     for action in actions:
-        ac = world.aircraft[action["aircraft"]]
         t = action["type"]
+        if t == "no_op":
+            continue
+        ac = world.aircraft[action["aircraft"]]
         if t == "assign_heading":
-            desired_heading = action["heading"]
-            if ac.max_turn_rate_deg_per_sec is not None:
-                max_delta = ac.max_turn_rate_deg_per_sec * world.tick_sec
-                delta = ((desired_heading - ac.heading_deg + 180) % 360) - 180
-                if abs(delta) > max_delta:
-                    delta = math.copysign(max_delta, delta)
-                ac.heading_deg = (ac.heading_deg + delta) % 360
-            else:
+            desired_heading = action["heading"] % 360
+            if ac.max_turn_rate_deg_per_sec is None:
                 ac.heading_deg = desired_heading
+                ac.target_heading_deg = None
+            else:
+                # Turn-rate-limited aircraft turn progressively each tick in advance().
+                ac.target_heading_deg = desired_heading
             ac.managed_route_active = False
             ac.manual_override_until_sec = world.time_sec + 120
         elif t == "assign_altitude":
@@ -342,7 +374,9 @@ def apply_actions(world: WorldState, actions: list[dict]) -> dict:
                 world.airport.departure_queue.remove(ac.callsign)
         elif t == "go_around":
             ac.status = "go_around"
+            ac.clearance = None
             ac.vertical_rate_fpm = 1200
+            ac.target_altitude_ft = max(3000.0, ac.altitude_ft)
             go_arounds += 1
         elif t in {"hold_short", "hold_position"}:
             ac.speed_kt = 0
@@ -362,6 +396,7 @@ def apply_actions(world: WorldState, actions: list[dict]) -> dict:
             ac.hold_phase = "inbound"
             ac.hold_leg_progress_nm = 0.0
             ac.hold_turn_remaining_deg = 0.0
+            ac.target_heading_deg = None
             ac.managed_route_active = False
             ac.manual_override_until_sec = None
             ac.status = "holding"
@@ -382,8 +417,7 @@ def apply_actions(world: WorldState, actions: list[dict]) -> dict:
         elif t == "resume_procedure":
             ac.managed_route_active = True
             ac.manual_override_until_sec = None
-        elif t == "no_op":
-            continue
+            ac.target_heading_deg = None
     return {"go_around_count": go_arounds}
 
 
@@ -401,9 +435,14 @@ def _sample_command_delay_sec(world: WorldState, rng: random.Random) -> int:
 def _enqueue_actions(world: WorldState, pending_commands: list[dict], valid_actions: list[dict], rng: random.Random) -> None:
     for action in valid_actions:
         action_type = action["type"]
-        ac = world.aircraft[action["aircraft"]]
-        should_delay = action_type in AIRBORNE_DELAYED_ACTION_TYPES and ac.status in {"airborne", "on_final", "go_around", "airborne_departure"}
-        if should_delay and action_type not in IMMEDIATE_ACTION_EXEMPT_TYPES:
+        callsign = action.get("aircraft")
+        ac = world.aircraft.get(callsign) if isinstance(callsign, str) else None
+        should_delay = (
+            ac is not None
+            and action_type in AIRBORNE_DELAYED_ACTION_TYPES
+            and ac.status in {"airborne", "on_final", "go_around", "airborne_departure"}
+        )
+        if should_delay:
             delay_sec = _sample_command_delay_sec(world, rng)
             pending_commands.append({
                 "action": action,
@@ -433,7 +472,10 @@ def apply_events(world: WorldState) -> list[dict]:
     for event in world.events:
         if event.get("applied"):
             continue
-        if event.get("time_sec") != world.time_sec:
+        time_sec = event.get("time_sec")
+        # Fire at the first tick at-or-after the scheduled time so off-tick
+        # event times are not silently skipped.
+        if not isinstance(time_sec, int) or time_sec > world.time_sec:
             continue
         event["applied"] = True
         etype = event["type"]
@@ -501,6 +543,7 @@ def _build_score_result(
     predicted_conflicts_count_total: int,
     manifest: dict | None,
     restricted_zone_violation_count: int,
+    runway_incursion_count: int = 0,
     emergency_handled_by_type: dict[str, int] | None = None,
     emergency_unhandled_by_type: dict[str, int] | None = None,
 ) -> dict:
@@ -539,6 +582,7 @@ def _build_score_result(
             + emergency_priority_violation_count * scoring.emergency_priority_violation_penalty
         ),
         ScoreComponentId.RESTRICTED_ZONE_VIOLATION: restricted_zone_violation_count * scoring.restricted_zone_violation_penalty,
+        ScoreComponentId.RUNWAY_INCURSION: runway_incursion_count * scoring.runway_incursion_penalty,
     }
     raw_score = sum(score_breakdown.values())
     simulated_hours = world.time_sec / 3600 if world.time_sec > 0 else 0.0
@@ -576,6 +620,7 @@ def _build_score_result(
             "predicted_conflicts_count_total": predicted_conflicts_count_total,
             "throughput_ops_per_hour": throughput_ops_per_hour,
             "restricted_zone_violation_count": restricted_zone_violation_count,
+            "runway_incursion_count": runway_incursion_count,
             "emergency_handled_by_type": emergency_handled_by_type or {},
             "emergency_unhandled_by_type": emergency_unhandled_by_type or {},
         },
@@ -688,6 +733,7 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
     active_conflicts_count_total = 0
     predicted_conflicts_count_total = 0
     restricted_zone_violation_count = 0
+    runway_incursion_count = 0
     violated_zone_entries: set[tuple[str, str]] = set()
     lifecycle = ConflictLifecycleTracker()
     cumulative_score_components = {
@@ -706,6 +752,7 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
         ScoreComponentId.EMERGENCY_UNHANDLED: 0.0,
         ScoreComponentId.EMERGENCY_PRIORITY_COMPLIANCE: 0.0,
         ScoreComponentId.RESTRICTED_ZONE_VIOLATION: 0.0,
+        ScoreComponentId.RUNWAY_INCURSION: 0.0,
     }
     tick_records: list[dict] = []
     pending_commands: list[dict] = []
@@ -818,9 +865,11 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
         if world.airport.runway_occupied_by and all(a.status in {"landed", "exited_airspace"} for a in world.aircraft.values()):
             break
         prior_positions = {k: (a.x_nm, a.y_nm) for k, a in world.aircraft.items()}
-        advance(world)
+        advance_events = advance(world)
+        runway_incursion_count += sum(1 for e in advance_events if e.get("type") == "runway_incursion")
         restricted_events = _detect_restricted_zone_crossings(world, prior_positions, violated_zone_entries)
         restricted_zone_violation_count += len(restricted_events)
+        tick_records[-1]["triggered_events"].extend(advance_events)
         tick_records[-1]["triggered_events"].extend(restricted_events)
         world.time_sec += world.tick_sec
         if world.airport.runway_occupied_until_sec is not None and world.time_sec >= world.airport.runway_occupied_until_sec:
@@ -864,6 +913,7 @@ def run(world: WorldState, agent, max_ticks: int, trace_path: Path, manifest: di
         predicted_conflicts_count_total=predicted_conflicts_count_total,
         manifest=manifest,
         restricted_zone_violation_count=restricted_zone_violation_count,
+        runway_incursion_count=runway_incursion_count,
         emergency_handled_by_type=emergency_handled_by_type,
         emergency_unhandled_by_type=emergency_unhandled_by_type,
     )

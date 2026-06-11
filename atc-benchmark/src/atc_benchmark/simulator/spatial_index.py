@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterable, Iterator
 from math import floor
-from typing import Generic, Iterable, Iterator, TypeVar
+from typing import Generic, TypeVar
 
 T = TypeVar("T")
 
