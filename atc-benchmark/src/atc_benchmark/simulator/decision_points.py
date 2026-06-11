@@ -13,7 +13,17 @@ def _angle_delta_deg(a: float, b: float) -> float:
     return abs((a - b + 180) % 360 - 180)
 
 
-def detect_decision_points(world: WorldState) -> list[dict]:
+def detect_decision_points(
+    world: WorldState,
+    conflicts: list[dict] | None = None,
+    predictions: list[dict] | None = None,
+) -> list[dict]:
+    """Detect controller decision points.
+
+    ``conflicts``/``predictions`` accept precomputed results from
+    detect_conflicts/predict_conflicts so callers that already ran them this
+    tick do not pay for a second pass.
+    """
     out: list[dict] = []
 
     runway_heading = _runway_heading_deg(world.airport.active_runway)
@@ -28,10 +38,10 @@ def detect_decision_points(world: WorldState) -> list[dict]:
             "active_runway": world.airport.active_runway,
         })
 
-    for c in detect_conflicts(world):
+    for c in detect_conflicts(world) if conflicts is None else conflicts:
         out.append({"type": "active_conflict", **c})
-    for c in predict_conflicts(world):
-        out.append(c)
+    for c in predict_conflicts(world) if predictions is None else predictions:
+        out.append(dict(c))
 
     for ac in world.aircraft.values():
         if ac.status == "waiting_departure":

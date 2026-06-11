@@ -13,46 +13,48 @@ from atc_benchmark.runner.run_scenario import build_manifest
 from atc_benchmark.server import LiveTransportServer, create_live_asgi_app
 from atc_benchmark.simulator.conflict_detection import detect_conflicts, predict_conflicts
 from atc_benchmark.simulator.decision_points import detect_decision_points
-from atc_benchmark.simulator.engine import advance, apply_events, load_world
+from atc_benchmark.simulator.engine import SimulationStepper, load_world
 from atc_benchmark.simulator.models import WorldState
 
 
-def _tick_event(
-    world: WorldState,
-    tick_id: int,
-    *,
-    session_id: str,
-    triggered_events: list[dict[str, Any]],
-) -> dict[str, Any]:
+def _running_score_summary(score: dict[str, Any]) -> dict[str, Any]:
+    """Trim a full score result to the fields a live HUD needs every tick."""
     return {
-        "tick_id": tick_id,
+        "score": score["score"],
+        "score_breakdown": score["score_breakdown"],
+        "safety": score["safety"],
+        "efficiency": score["efficiency"],
+        "control_quality": score["control_quality"],
+    }
+
+
+def _initial_tick_event(world: WorldState, *, session_id: str) -> dict[str, Any]:
+    """State-only preview published after a reset, before the clock advances."""
+    conflicts = detect_conflicts(world)
+    predictions = predict_conflicts(world)
+    return {
+        "tick_id": 0,
         "time": world.time_sec,
         "session_id": session_id,
-        "triggered_events": triggered_events,
-        "decision_points": detect_decision_points(world),
+        "triggered_events": [],
+        "decision_points": detect_decision_points(world, conflicts=conflicts, predictions=predictions),
         "observation": None,
         "agent_exception": None,
         "actions": [],
         "invalid_actions": [],
-        "conflicts": detect_conflicts(world),
-        "predicted_conflicts": predict_conflicts(world),
+        "conflicts": conflicts,
+        "predicted_conflicts": predictions,
         "state": world.snapshot(),
     }
 
 
-def _advance_world(world: WorldState) -> None:
-    advance(world)
-    world.time_sec += world.tick_sec
-    if world.airport.runway_occupied_until_sec is not None and world.time_sec >= world.airport.runway_occupied_until_sec:
-        world.airport.runway_occupied_by = None
-        world.airport.runway_phase = None
-        world.airport.runway_occupied_until_sec = None
-
-
-def _level_complete(world: WorldState) -> bool:
-    return bool(world.airport.runway_occupied_by) and all(
-        aircraft.status in {"landed", "exited_airspace"} for aircraft in world.aircraft.values()
-    )
+def _write_session_artifacts(stepper: SimulationStepper, score: dict[str, Any], output_dir: Path) -> dict[str, str]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    trace_path = output_dir / "trace.jsonl"
+    score_path = output_dir / "score.json"
+    stepper.write_trace(trace_path)
+    score_path.write_text(json.dumps(score, indent=2))
+    return {"trace": str(trace_path), "score": str(score_path)}
 
 
 async def _run_simulation(
@@ -64,41 +66,50 @@ async def _run_simulation(
     max_ticks: int,
     tick_interval_sec: float,
     manifest: dict[str, Any],
+    output_dir: Path,
 ) -> None:
-    while runtime["tick_id"] < max_ticks:
+    async def finish_session(outcome: str) -> None:
+        async with lock:
+            stepper = runtime["stepper"]
+            stepper.finalize()
+            score = stepper.build_score(manifest)
+            score.setdefault("metrics", {})["session_outcome"] = outcome
+            artifacts = _write_session_artifacts(stepper, score, output_dir)
+        await live_server.publish_envelope(
+            {
+                "type": "level_complete",
+                "session_id": session_id,
+                "outcome": outcome,
+                "score": score,
+                "artifacts": artifacts,
+            }
+        )
+
+    while runtime["stepper"].tick_id < max_ticks:
         if runtime.get("ended"):
-            await live_server.publish_envelope({"type": "level_complete", "session_id": session_id, "score": None})
+            await finish_session("ended_by_user")
             return
         if runtime.get("paused"):
             await asyncio.sleep(0.05)
             continue
 
         async with lock:
-            world = runtime["world"]
-            tick_id = runtime["tick_id"]
-            triggered_events = apply_events(world)
-            event = _tick_event(world, tick_id, session_id=session_id, triggered_events=triggered_events)
-            event["actions"] = runtime["pending_actions"]
-            event["invalid_actions"] = runtime["pending_invalid_actions"]
-            runtime["pending_actions"] = []
-            runtime["pending_invalid_actions"] = []
-            complete = _level_complete(world)
-            _advance_world(world)
-            runtime["tick_id"] += 1
+            stepper = runtime["stepper"]
+            stepper.begin_tick()
+            record = stepper.finish_tick()
+            event = stepper.record_to_event(record)
+            event["tick_id"] = stepper.tick_id - 1
+            event["session_id"] = session_id
+            event["running_score"] = _running_score_summary(stepper.build_score())
+            complete = stepper.is_complete()
 
         await live_server.publish_envelope({"type": "tick", "session_id": session_id, "tick": event})
         if complete:
-            await live_server.publish_envelope({"type": "level_complete", "session_id": session_id, "score": None})
+            await finish_session("all_traffic_handled")
             return
         await asyncio.sleep(tick_interval_sec)
 
-    await live_server.publish_envelope(
-        {
-            "type": "level_complete",
-            "session_id": session_id,
-            "score": {"score": None, "run_manifest": manifest, "metrics": {"max_ticks_reached": max_ticks}},
-        }
-    )
+    await finish_session("max_ticks_reached")
 
 
 async def serve_live(
@@ -108,6 +119,7 @@ async def serve_live(
     port: int,
     max_ticks: int,
     tick_interval_sec: float,
+    output_dir: Path,
 ) -> None:
     try:
         import uvicorn
@@ -119,15 +131,13 @@ async def serve_live(
     world = load_world(scenario)
     session_id = uuid4().hex
     manifest = build_manifest(scenario, world, "live", max_ticks)
+    session_output_dir = output_dir / f"{scenario.stem}-{session_id[:8]}"
     lock = asyncio.Lock()
     live_server = LiveTransportServer()
     runtime: dict[str, Any] = {
-        "world": world,
-        "tick_id": 0,
+        "stepper": SimulationStepper(world),
         "paused": False,
         "ended": False,
-        "pending_actions": [],
-        "pending_invalid_actions": [],
     }
 
     async def publish_control_status(status: str) -> None:
@@ -137,7 +147,7 @@ async def serve_live(
                 "session_id": session_id,
                 "status": status,
                 "paused": runtime["paused"],
-                "tick_id": runtime["tick_id"],
+                "tick_id": runtime["stepper"].tick_id,
             }
         )
 
@@ -152,28 +162,17 @@ async def serve_live(
                 runtime["paused"] = False
                 response = {"type": "control_ack", "status": "running", "ok": True, "session_id": session_id}
             elif envelope_type == "reset":
-                runtime["world"] = load_world(scenario)
-                runtime["tick_id"] = 0
+                runtime["stepper"] = SimulationStepper(load_world(scenario))
                 runtime["paused"] = False
                 runtime["ended"] = False
-                runtime["pending_actions"] = []
-                runtime["pending_invalid_actions"] = []
-                event = _tick_event(runtime["world"], 0, session_id=session_id, triggered_events=[])
+                event = _initial_tick_event(runtime["stepper"].world, session_id=session_id)
                 await live_server.publish_envelope({"type": "tick", "session_id": session_id, "tick": event})
-                runtime["tick_id"] = 1
                 response = {"type": "control_ack", "status": "reset", "ok": True, "session_id": session_id}
             elif envelope_type == "end_session":
                 runtime["ended"] = True
                 response = {"type": "control_ack", "status": "ended", "ok": True, "session_id": session_id}
             else:
-                response = handle_ws_envelope(runtime["world"], payload)
-                details = response.get("details", {})
-                if response.get("ok"):
-                    runtime["pending_actions"].append(details.get("accepted_action", payload.get("command")))
-                else:
-                    runtime["pending_invalid_actions"].append(
-                        {"action": details.get("rejected_action", payload.get("command")), "reason": response.get("reason")}
-                    )
+                response = handle_ws_envelope(runtime["stepper"], payload)
         if envelope_type in {"pause", "resume", "reset", "end_session"}:
             await publish_control_status(str(response["status"]))
         return response
@@ -190,11 +189,22 @@ async def serve_live(
             max_ticks=max_ticks,
             tick_interval_sec=tick_interval_sec,
             manifest=manifest,
+            output_dir=session_output_dir,
         )
     )
     server_task = asyncio.create_task(server.serve())
 
-    print(json.dumps({"live_url": f"ws://{host}:{port}/live", "session_id": session_id, "scenario": scenario.name}, indent=2))
+    print(
+        json.dumps(
+            {
+                "live_url": f"ws://{host}:{port}/live",
+                "session_id": session_id,
+                "scenario": scenario.name,
+                "output_dir": str(session_output_dir),
+            },
+            indent=2,
+        )
+    )
     try:
         done, _pending = await asyncio.wait({simulation_task, server_task}, return_when=asyncio.FIRST_COMPLETED)
         for task in done:
@@ -219,6 +229,11 @@ def main() -> None:
         default=1.0,
         help="Wall-clock seconds between simulator ticks.",
     )
+    parser.add_argument(
+        "--output-dir",
+        default="outputs/live",
+        help="Directory for per-session trace and score artifacts.",
+    )
     args = parser.parse_args()
     scenario = resolve_scenario_path(Path(args.scenario))
     asyncio.run(
@@ -228,6 +243,7 @@ def main() -> None:
             port=args.port,
             max_ticks=args.max_ticks,
             tick_interval_sec=args.tick_interval_sec,
+            output_dir=Path(args.output_dir),
         )
     )
 

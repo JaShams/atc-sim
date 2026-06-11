@@ -3,9 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from atc_benchmark.simulator.engine import apply_actions
-from atc_benchmark.simulator.models import WorldState
-from atc_benchmark.simulator.validator import validate_actions
+from atc_benchmark.simulator.engine import SimulationStepper
 
 
 @dataclass(slots=True)
@@ -34,13 +32,6 @@ def _nack(transport: str, reason: str, *, details: dict[str, Any] | None = None)
     return CommandAck(ok=False, status="nack", transport=transport, reason=reason, details=details).to_dict()
 
 
-def _ack(transport: str, action: dict[str, Any], *, effects: dict[str, Any] | None = None) -> dict[str, Any]:
-    details: dict[str, Any] = {"accepted_action": action}
-    if effects:
-        details["effects"] = effects
-    return CommandAck(ok=True, status="ack", transport=transport, details=details).to_dict()
-
-
 def _extract_command_from_envelope(payload: dict[str, Any], *, require_session: bool) -> tuple[dict[str, Any] | None, str | None]:
     if payload.get("type") != "command":
         return None, "unsupported_envelope_type"
@@ -52,36 +43,43 @@ def _extract_command_from_envelope(payload: dict[str, Any], *, require_session: 
     return command, None
 
 
-def process_command(world: WorldState, command: dict[str, Any], *, transport: str) -> dict[str, Any]:
-    valid, invalid = validate_actions(world, [command])
-    if invalid:
-        invalid_item = invalid[0]
+def process_command(stepper: SimulationStepper, command: dict[str, Any], *, transport: str) -> dict[str, Any]:
+    """Validate one live command and enqueue it for execution at the next tick.
+
+    The command is read back immediately (ack/nack) but executes with the same
+    pilot readback delay used in batch runs.
+    """
+    enqueued, invalid = stepper.submit_command(command)
+    if invalid is not None:
         return _nack(
             transport,
-            invalid_item.get("reason", "invalid_command"),
-            details={"rejected_action": invalid_item.get("action", command)},
+            invalid.get("reason", "invalid_command"),
+            details={"rejected_action": invalid.get("action", command)},
         )
-    applied_effects = apply_actions(world, valid)
-    return _ack(transport, valid[0], effects=applied_effects)
+    details: dict[str, Any] = {"accepted_action": command}
+    if enqueued is not None:
+        details["issued_at_sec"] = enqueued["issued_at_sec"]
+        details["scheduled_execution_time_sec"] = enqueued["scheduled_execution_time_sec"]
+    return CommandAck(ok=True, status="ack", transport=transport, details=details).to_dict()
 
 
-def handle_ws_envelope(world: WorldState, payload: dict[str, Any]) -> dict[str, Any]:
+def handle_ws_envelope(stepper: SimulationStepper, payload: dict[str, Any]) -> dict[str, Any]:
     command, error = _extract_command_from_envelope(payload, require_session=True)
     if error:
         return _nack("websocket", error)
     assert command is not None
-    return process_command(world, command, transport="websocket")
+    return process_command(stepper, command, transport="websocket")
 
 
-def handle_http_command(world: WorldState, payload: dict[str, Any]) -> dict[str, Any]:
+def handle_http_command(stepper: SimulationStepper, payload: dict[str, Any]) -> dict[str, Any]:
     if payload.get("type") == "command":
         command, error = _extract_command_from_envelope(payload, require_session=False)
         if error:
             return _nack("http", error)
         assert command is not None
-        return process_command(world, command, transport="http")
+        return process_command(stepper, command, transport="http")
     if isinstance(payload.get("command"), dict):
-        return process_command(world, payload["command"], transport="http")
+        return process_command(stepper, payload["command"], transport="http")
     if isinstance(payload, dict) and "type" in payload and "aircraft" in payload:
-        return process_command(world, payload, transport="http")
+        return process_command(stepper, payload, transport="http")
     return _nack("http", "missing_command")

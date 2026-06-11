@@ -69,6 +69,8 @@ atc-live scenarios/crossing_conflict_001.json --host 127.0.0.1 --port 8080
 
 Open `viewer/index.html`, switch the mode dropdown to `Live mode`, keep the endpoint as `ws://localhost:8080/live`, and click `Connect`. The viewer streams simulator ticks and sends live commands back over the same websocket.
 
+Live sessions use the same simulation semantics as batch runs: commands are acknowledged immediately but execute at the next tick (plus any scenario-configured pilot readback delay), emergencies and restricted zones progress in real time, and every tick carries a `running_score`. When the session ends — all traffic handled, ended by the user, or the tick budget runs out — the server publishes a final score (`level_complete` with an `outcome` field) and writes per-session `trace.jsonl` and `score.json` artifacts under `--output-dir` (default `outputs/live`), so finished live games can be reloaded in replay mode.
+
 ## Local Checks
 
 ```bash
