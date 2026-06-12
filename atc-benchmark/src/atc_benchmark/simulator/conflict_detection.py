@@ -78,8 +78,12 @@ def _established_on_parallel_ils(a, b, world: WorldState) -> bool:
     for pair in pairs:
         if not isinstance(pair, Mapping):
             continue
-        rwy_a = runway_by_id.get(pair.get("runway_a"))
-        rwy_b = runway_by_id.get(pair.get("runway_b"))
+        runway_a_id = pair.get("runway_a")
+        runway_b_id = pair.get("runway_b")
+        if not isinstance(runway_a_id, str) or not isinstance(runway_b_id, str):
+            continue
+        rwy_a = runway_by_id.get(runway_a_id)
+        rwy_b = runway_by_id.get(runway_b_id)
         if not rwy_a or not rwy_b:
             continue
         if not (_is_in_final_approach_envelope(a, rwy_a) and _is_in_final_approach_envelope(b, rwy_b)) and not (_is_in_final_approach_envelope(a, rwy_b) and _is_in_final_approach_envelope(b, rwy_a)):
@@ -94,7 +98,7 @@ def _established_on_parallel_ils(a, b, world: WorldState) -> bool:
         d_ab = _distance_to_centerline_nm(a, ils_b)
         d_ba = _distance_to_centerline_nm(b, ils_a)
         d_bb = _distance_to_centerline_nm(b, ils_b)
-        if None in {d_aa, d_ab, d_ba, d_bb}:
+        if d_aa is None or d_ab is None or d_ba is None or d_bb is None:
             continue
         if d_aa <= tol and d_bb <= tol and d_ab > tol and d_ba > tol:
             return True
@@ -147,7 +151,7 @@ def _pair_horizontal_minimum_nm(a, b, base_min_nm: float) -> float:
 def _candidate_pairs(aircraft: list, horizontal_gate_nm: float):
     # Include possible extended wake minima (up to 7 NM) in candidate pruning radius.
     search_gate_nm = max(horizontal_gate_nm, 7.0)
-    index = SpatialHashIndex(cell_size_nm=max(search_gate_nm, 0.1))
+    index: SpatialHashIndex = SpatialHashIndex(cell_size_nm=max(search_gate_nm, 0.1))
     seen: set[tuple[str, str]] = set()
     for ac in aircraft:
         for other in index.query_neighbors(ac.x_nm, ac.y_nm):

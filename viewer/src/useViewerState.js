@@ -814,8 +814,10 @@ export default function useViewerState() {
         try {
           const payload = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
           handleLiveEnvelope(payload);
-        } catch {
-          // ignore parsing error
+        } catch (err) {
+          const message = `Malformed live message: ${err?.message || 'could not parse websocket payload'}.`;
+          setLoadStatus(message);
+          appendLiveLog(message);
         }
       };
       

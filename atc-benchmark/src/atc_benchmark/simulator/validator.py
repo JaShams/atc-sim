@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from math import cos, radians, sin
+from typing import TypeGuard
 
 from .models import ALLOWED_ACTION_TYPES, WorldState
 
@@ -14,6 +15,10 @@ def _runway_heading_deg(active_runway: str) -> float:
 
 def _angle_delta_deg(a: float, b: float) -> float:
     return abs((a - b + 180) % 360 - 180)
+
+
+def _is_number(value: object) -> TypeGuard[int | float]:
+    return isinstance(value, int | float) and not isinstance(value, bool)
 
 
 def _closest_inbound_arrival_final_distance(world: WorldState) -> float | None:
@@ -75,12 +80,18 @@ def validate_actions(world: WorldState, actions: list[dict]) -> tuple[list[dict]
             assert isinstance(cs, str)
             callsign = cs
             ac = world.aircraft[callsign]
-            if atype == "assign_heading" and not (0 <= action.get("heading", -1) <= 359):
-                reason = "invalid_heading"
-            elif atype == "assign_altitude" and action.get("altitude_ft", 0) < world.rules.min_altitude_ft:
-                reason = "invalid_altitude"
-            elif atype == "assign_speed" and not (world.rules.min_speed_kt <= action.get("speed_kt", -1) <= world.rules.max_speed_kt):
-                reason = "invalid_speed"
+            if atype == "assign_heading":
+                heading = action.get("heading")
+                if not _is_number(heading) or not (0 <= heading <= 359):
+                    reason = "invalid_heading"
+            elif atype == "assign_altitude":
+                altitude = action.get("altitude_ft")
+                if not _is_number(altitude) or altitude < world.rules.min_altitude_ft:
+                    reason = "invalid_altitude"
+            elif atype == "assign_speed":
+                speed = action.get("speed_kt")
+                if not _is_number(speed) or not (world.rules.min_speed_kt <= speed <= world.rules.max_speed_kt):
+                    reason = "invalid_speed"
             elif atype == "clear_to_land" and projected_runway_release_sec is not None and projected_runway_release_sec > projected_time:
                 reason = "runway_occupied"
             elif atype == "clear_to_land" and ac.role != "arrival":
@@ -106,9 +117,9 @@ def validate_actions(world: WorldState, actions: list[dict]) -> tuple[list[dict]
                     reason = "unknown_waypoint"
                 elif action.get("turn_direction") not in {"left", "right"}:
                     reason = "invalid_turn_direction"
-                elif not isinstance(action.get("leg_length_nm"), (int, float)) or action.get("leg_length_nm") <= 0:
+                elif not _is_number(action.get("leg_length_nm")) or action["leg_length_nm"] <= 0:
                     reason = "invalid_leg_length"
-                elif not isinstance(action.get("hold_altitude_ft"), (int, float)) or action.get("hold_altitude_ft") < world.rules.min_altitude_ft:
+                elif not _is_number(action.get("hold_altitude_ft")) or action["hold_altitude_ft"] < world.rules.min_altitude_ft:
                     reason = "invalid_hold_altitude"
             elif atype == "exit_hold" and ac.hold_fix_id is None:
                 reason = "not_in_hold"
