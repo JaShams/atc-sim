@@ -62,6 +62,9 @@ def validate_actions(world: WorldState, actions: list[dict]) -> tuple[list[dict]
         cs = action.get("aircraft")
         atype = action.get("type")
         reason = None
+        if atype == "no_op" and cs is None:
+            valid.append(action)
+            continue
         if not isinstance(cs, str) or cs not in world.aircraft:
             reason = "unknown_aircraft"
         elif atype not in ALLOWED_ACTION_TYPES:
@@ -82,7 +85,7 @@ def validate_actions(world: WorldState, actions: list[dict]) -> tuple[list[dict]
                 reason = "runway_occupied"
             elif atype == "clear_to_land" and ac.role != "arrival":
                 reason = "not_arrival"
-            elif atype == "clear_to_land" and ac.status not in {"airborne", "on_final"}:
+            elif atype == "clear_to_land" and ac.status not in {"airborne", "on_final", "go_around"}:
                 reason = "not_on_final_or_arrival"
             elif atype == "clear_to_land" and not _is_aligned_for_active_runway(world, ac):
                 reason = "not_aligned_with_active_runway"

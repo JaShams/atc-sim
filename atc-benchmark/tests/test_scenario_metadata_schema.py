@@ -2,8 +2,8 @@
 from atc_benchmark.paths import scenarios_dir
 
 REQUIRED_TOP_LEVEL_KEYS = {"tags", "difficulty_tier", "intended_stressors", "expected_baseline_ranges"}
-ALLOWED_TAGS = {"safety", "efficiency", "event"}
-ALLOWED_TIERS = {"intro", "intermediate", "advanced", "expert"}
+ALLOWED_TAGS = {"safety", "efficiency", "event", "tutorial"}
+ALLOWED_TIERS = {"tutorial", "intro", "intermediate", "advanced", "expert"}
 
 
 def test_scenario_metadata_is_complete():

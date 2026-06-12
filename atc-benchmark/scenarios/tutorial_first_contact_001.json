@@ -1,0 +1,68 @@
+{
+  "tick_sec": 5,
+  "airport": {
+    "runway_id": "09",
+    "active_runway": "09",
+    "departure_queue": ["DEP1"],
+    "layout": {
+      "runways": [
+        {
+          "id": "09",
+          "ends": [{"x_nm": -1.4, "y_nm": 0.0}, {"x_nm": 1.4, "y_nm": 0.0}],
+          "width_nm": 0.04
+        }
+      ],
+      "fixes": [
+        {"id": "ALPHA", "x_nm": -10.0, "y_nm": 6.0},
+        {"id": "BRAVO", "x_nm": -10.0, "y_nm": -6.0}
+      ]
+    },
+    "default_range_nm": 40
+  },
+  "weather": {"wind_dir_deg": 90, "wind_speed_kt": 8},
+  "rules": {
+    "lookahead_seconds": 60,
+    "default_turn_rate_deg_per_sec": 3.0,
+    "speed_change_rate_kt_per_sec": 2.0,
+    "takeoff_roll_sec": 30,
+    "airspace_exit_distance_nm": 12
+  },
+  "aircraft": [
+    {
+      "callsign": "ARR1",
+      "role": "arrival",
+      "x_nm": -13.0,
+      "y_nm": 0.0,
+      "altitude_ft": 2800,
+      "speed_kt": 180,
+      "heading_deg": 90,
+      "status": "airborne",
+      "target_runway": "09",
+      "vertical_rate_fpm": -600,
+      "ideal_landing_time_sec": 260
+    },
+    {
+      "callsign": "DEP1",
+      "role": "departure",
+      "x_nm": 0.0,
+      "y_nm": 0.0,
+      "altitude_ft": 0,
+      "speed_kt": 0,
+      "heading_deg": 90,
+      "status": "waiting_departure",
+      "ready_time_sec": 0,
+      "ideal_takeoff_time_sec": 40
+    }
+  ],
+  "scenario_metadata": {
+    "difficulty_tier": "tutorial",
+    "tags": ["tutorial", "efficiency"],
+    "intended_stressors": ["sequencing_basics"],
+    "description": "Learn the controls: clear DEP1 for takeoff right away (type DEP1 TAKEOFF), then clear ARR1 to land once the runway is free (ARR1 LAND). Smooth turns and a real takeoff roll are enabled here.",
+    "star_thresholds": [1, 40, 75],
+    "expected_baseline_ranges": {
+      "score": [0, 110],
+      "invalid_commands": [0, 5]
+    }
+  }
+}

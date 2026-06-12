@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -25,10 +26,14 @@ class LiveTransportServer:
     def __init__(self) -> None:
         self._subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
         self._latest_tick_envelope: dict[str, Any] | None = None
+        self._latest_level_envelope: dict[str, Any] | None = None
 
     async def subscribe_tick_stream(self) -> asyncio.Queue[dict[str, Any]]:
+        """Subscribe and replay current session state (active level + latest tick)."""
         queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._subscribers.add(queue)
+        if self._latest_level_envelope is not None:
+            await queue.put(self._latest_level_envelope)
         if self._latest_tick_envelope is not None:
             await queue.put(self._latest_tick_envelope)
         return queue
@@ -37,8 +42,17 @@ class LiveTransportServer:
         self._subscribers.discard(queue)
 
     async def publish_envelope(self, envelope: dict[str, Any]) -> None:
-        if envelope.get("type") == "tick":
+        envelope_type = envelope.get("type")
+        if envelope_type == "tick":
             self._latest_tick_envelope = envelope
+        elif envelope_type == "level_started":
+            self._latest_level_envelope = envelope
+            self._latest_tick_envelope = None
+        elif envelope_type == "level_complete":
+            # The level is over: late joiners should land in the lobby, not on
+            # a stale running level.
+            self._latest_level_envelope = None
+            self._latest_tick_envelope = None
         for subscriber in list(self._subscribers):
             await subscriber.put(envelope)
 
@@ -97,11 +111,18 @@ def create_live_asgi_app(live_server: LiveTransportServer, *, on_command: Comman
         await send({"type": "websocket.accept"})
         queue: asyncio.Queue[dict[str, Any]] | None = None
         forward_task: asyncio.Task[Any] | None = None
+        # The tick-forwarding task and the command-response path both write to
+        # this connection; serialize sends so frames never interleave.
+        send_lock = asyncio.Lock()
+
+        async def safe_send_json(payload_out: dict[str, Any]) -> None:
+            async with send_lock:
+                await send({"type": "websocket.send", "text": json.dumps(payload_out)})
 
         async def forward_ticks(tick_queue: asyncio.Queue[dict[str, Any]]) -> None:
             while True:
                 envelope = await tick_queue.get()
-                await send({"type": "websocket.send", "text": json.dumps(envelope)})
+                await safe_send_json(envelope)
 
         try:
             while True:
@@ -112,16 +133,22 @@ def create_live_asgi_app(live_server: LiveTransportServer, *, on_command: Comman
                     continue
 
                 text = message.get("text") or "{}"
-                payload = json.loads(text)
+                try:
+                    payload = json.loads(text)
+                except json.JSONDecodeError:
+                    await safe_send_json({"type": "command_ack", "ok": False, "status": "nack", "reason": "malformed_json"})
+                    continue
+                if not isinstance(payload, dict):
+                    await safe_send_json({"type": "command_ack", "ok": False, "status": "nack", "reason": "malformed_envelope"})
+                    continue
                 if payload.get("type") == "subscribe_tick_stream" and queue is None:
                     queue = await live_server.subscribe_tick_stream()
                     forward_task = asyncio.create_task(forward_ticks(queue))
                     continue
-                if payload.get("type") in {"command", "pause", "resume", "reset", "end_session"} and on_command is not None:
-                    response = on_command(payload)
-                    if asyncio.iscoroutine(response):
-                        response = await response
-                    await send({"type": "websocket.send", "text": json.dumps(response)})
+                if payload.get("type") in {"command", "pause", "resume", "reset", "end_session", "list_levels", "start_level"} and on_command is not None:
+                    result = on_command(payload)
+                    response = await result if inspect.isawaitable(result) else result
+                    await safe_send_json(response)
         finally:
             if forward_task is not None:
                 forward_task.cancel()

@@ -1966,3 +1966,351 @@ dd {
   }
 
 }
+
+/* --- Level select (game lobby) --- */
+
+.level-select-panel {
+  position: absolute;
+  inset: 64px auto auto 50%;
+  transform: translateX(-50%);
+  width: min(860px, calc(100% - 48px));
+  max-height: calc(100% - 128px);
+  overflow-y: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  padding: 20px;
+  z-index: 24;
+}
+
+.level-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.level-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+}
+
+.level-card:hover,
+.level-card:focus-visible {
+  border-color: var(--accent);
+  background: var(--surface-raised);
+}
+
+.level-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.level-card-traffic,
+.level-card-tags {
+  color: var(--muted-strong);
+  font-size: 12px;
+}
+
+.level-card-best {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted-strong);
+}
+
+/* --- Stars --- */
+
+.stars {
+  letter-spacing: 2px;
+  color: var(--muted);
+  font-size: 16px;
+}
+
+.stars .star.earned {
+  color: var(--warn);
+}
+
+/* --- Mission debrief overlay --- */
+
+.debrief-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(4, 7, 9, 0.72);
+  z-index: 30;
+}
+
+.debrief-card {
+  width: min(440px, calc(100% - 48px));
+  max-height: calc(100% - 64px);
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.debrief-card h2 {
+  margin: 0;
+}
+
+.debrief-card.outcome-success h2 {
+  color: var(--good);
+}
+
+.debrief-card.outcome-crashed h2,
+.debrief-card.outcome-failure h2 {
+  color: var(--bad);
+}
+
+.debrief-card.outcome-timeout h2 {
+  color: var(--warn);
+}
+
+.debrief-card .stars {
+  font-size: 24px;
+}
+
+.debrief-score {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 14px;
+  background: var(--surface-soft);
+}
+
+.debrief-score b {
+  font-family: var(--mono);
+  font-size: 22px;
+}
+
+.debrief-details,
+.debrief-breakdown {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted-strong);
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.debrief-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.debrief-actions button {
+  flex: 1 1 auto;
+}
+
+.debrief-card.outcome-abandoned h2 {
+  color: var(--muted-strong);
+}
+
+/* --- Running score HUD --- */
+
+.score-hud {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 8px 16px;
+  z-index: 22;
+}
+
+.score-hud-main {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  position: relative;
+}
+
+.score-hud-main b {
+  font-family: var(--mono);
+  font-size: 22px;
+}
+
+.score-delta {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 700;
+  animation: score-delta-pop 1.6s ease-out forwards;
+}
+
+.score-delta.gain {
+  color: var(--good);
+}
+
+.score-delta.loss {
+  color: var(--bad);
+}
+
+@keyframes score-delta-pop {
+  0% { opacity: 0; transform: translateY(6px); }
+  15% { opacity: 1; transform: translateY(0); }
+  70% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-8px); }
+}
+
+.score-hud-stats {
+  display: flex;
+  gap: 12px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted-strong);
+}
+
+.score-hud-stats .bad {
+  color: var(--bad);
+}
+
+/* --- Flight strips --- */
+
+.flight-strips {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.flight-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+}
+
+.flight-strip.departure {
+  border-left-color: var(--departure);
+}
+
+.flight-strip.selected {
+  background: var(--surface-raised);
+  border-color: var(--accent);
+}
+
+.flight-strip.warn {
+  border-left-color: var(--warn);
+}
+
+.flight-strip.critical {
+  border-left-color: var(--bad);
+  background: var(--bad-soft);
+}
+
+.strip-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.strip-title b {
+  font-family: var(--mono);
+}
+
+.strip-title span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.strip-state {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted-strong);
+}
+
+.strip-clearance {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* --- Pause overlay --- */
+
+.pause-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(4, 7, 9, 0.55);
+  backdrop-filter: blur(1px);
+  z-index: 26;
+  pointer-events: none;
+}
+
+.pause-overlay b {
+  font-family: var(--mono);
+  font-size: 32px;
+  letter-spacing: 10px;
+  color: var(--text);
+}
+
+.pause-overlay span {
+  color: var(--muted-strong);
+  font-size: 13px;
+}
+
+/* --- Command cheat sheet --- */
+
+.command-cheat-sheet table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.command-cheat-sheet td {
+  padding: 3px 6px;
+  border-top: 1px solid var(--line);
+  color: var(--muted-strong);
+}
+
+.command-cheat-sheet code {
+  font-family: var(--mono);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+/* --- Level card description --- */
+
+.level-card-desc {
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1.4;
+}

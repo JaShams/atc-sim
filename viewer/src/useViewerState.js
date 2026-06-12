@@ -2,6 +2,36 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 
 const DEFAULT_LIVE_ENDPOINT = 'ws://localhost:8080/live';
 
+const LAST_TRACE_KEY = 'atc_last_trace_jsonl';
+const LAST_SCORE_KEY = 'atc_last_score_json';
+const LEVEL_RESULTS_KEY = 'atc_level_results';
+const MAX_PERSISTED_TRACE_CHARS = 4_000_000;
+
+function safeStorageGet(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function safeStorageSet(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function readStoredLevelResults() {
+  try {
+    return JSON.parse(safeStorageGet(LEVEL_RESULTS_KEY) || '{}') || {};
+  } catch {
+    return {};
+  }
+}
+
 const COMMAND_SCHEMA = {
   no_op: { label: 'No action', unitHint: null },
   assign_heading: { label: 'Assign heading', field: 'heading', min: 0, max: 359, step: 1, unitHint: 'degrees (0-359)' },
@@ -11,7 +41,10 @@ const COMMAND_SCHEMA = {
   clear_for_takeoff: { label: 'Clear for takeoff', unitHint: null },
   go_around: { label: 'Go around', unitHint: null },
   hold_short: { label: 'Hold short', unitHint: null },
-  hold_position: { label: 'Hold position', unitHint: null }
+  hold_position: { label: 'Hold position', unitHint: null },
+  hold_at_waypoint: { label: 'Hold at waypoint', unitHint: null },
+  exit_hold: { label: 'Exit hold', unitHint: null },
+  resume_procedure: { label: 'Resume procedure', unitHint: null }
 };
 
 const VALIDATOR_REASON_MESSAGES = {
@@ -27,7 +60,15 @@ const VALIDATOR_REASON_MESSAGES = {
   not_aligned_with_active_runway: 'Aircraft is not aligned with the active runway.',
   not_in_departure_queue: 'Aircraft is not in the departure queue.',
   arrival_too_close: 'Inbound arrival is too close for safe departure.',
-  not_on_approach: 'Aircraft is not on approach for go-around.'
+  not_on_approach: 'Aircraft is not on approach for go-around.',
+  invalid_waypoint: 'Provide a fix name for the hold.',
+  unknown_waypoint: 'No such fix on this airport chart.',
+  invalid_turn_direction: 'Hold turn direction must be left or right.',
+  invalid_leg_length: 'Hold leg length must be positive.',
+  invalid_hold_altitude: 'Hold altitude is below the minimum.',
+  not_in_hold: 'Aircraft is not holding.',
+  no_active_level: 'Start a level before sending commands.',
+  malformed_json: 'The server could not parse the command.'
 };
 
 const labelMap = {
@@ -279,6 +320,13 @@ export default function useViewerState() {
   const [liveRunState, setLiveRunState] = useState('Disconnected');
   const [liveFollowTail, setLiveFollowTail] = useState(true);
 
+  // Game flow state
+  const [levels, setLevels] = useState(null);
+  const [currentLevel, setCurrentLevel] = useState(null);
+  const [debrief, setDebrief] = useState(null);
+  const [bestResults, setBestResults] = useState(readStoredLevelResults);
+  const [hasSavedRun, setHasSavedRun] = useState(() => Boolean(safeStorageGet(LAST_TRACE_KEY)));
+
   // Command panel state
   const [commandText, setCommandText] = useState('');
   const [commandType, setCommandType] = useState('no_op');
@@ -339,48 +387,66 @@ export default function useViewerState() {
       });
   };
 
+  const applyParsedTrace = useCallback((parsedTrace, statusText) => {
+    setIsPlaying(false);
+    if (playTimerRef.current) clearInterval(playTimerRef.current);
+    playTimerRef.current = null;
+
+    const computedBounds = calculateBounds(parsedTrace);
+    setRadarBounds(computedBounds);
+
+    const defaultRange = computedBounds.defaultRangeNm || 80;
+    setRadarScopeRangeNm(defaultRange);
+
+    const center = computedBounds.displayCenter || {
+      x_nm: (computedBounds.minX + computedBounds.maxX) / 2,
+      y_nm: (computedBounds.minY + computedBounds.maxY) / 2
+    };
+    const boundsWidth = Math.max(1, computedBounds.maxX - computedBounds.minX);
+    const boundsHeight = Math.max(1, computedBounds.maxY - computedBounds.minY);
+    const boundsSpan = Math.max(boundsWidth, boundsHeight);
+    const zoom = Math.max(0.65, Math.min(16, boundsSpan / Math.max(1, defaultRange)));
+
+    setRadarView({ centerX: center.x_nm, centerY: center.y_nm, zoom });
+    setSelectedCallsign(null);
+    setHoveredCallsign(null);
+    setTraceEvents(parsedTrace);
+    setCurrentTickIndex(0);
+    setLoadStatus(statusText || `Loaded ${parsedTrace.length} ticks. Score file optional.`);
+  }, []);
+
   // Load trace files
   const loadTraceFile = useCallback(async (file) => {
     if (!file) return;
     try {
-      setIsPlaying(false);
-      if (playTimerRef.current) clearInterval(playTimerRef.current);
-      playTimerRef.current = null;
-
       const parsedTrace = await parseJsonl(file);
-      const computedBounds = calculateBounds(parsedTrace);
-      setRadarBounds(computedBounds);
-
-      const defaultRange = computedBounds.defaultRangeNm || 80;
-      setRadarScopeRangeNm(defaultRange);
-
-      const center = computedBounds.displayCenter || {
-        x_nm: (computedBounds.minX + computedBounds.maxX) / 2,
-        y_nm: (computedBounds.minY + computedBounds.maxY) / 2
-      };
-      
-      const zoomForScopeRange = (rangeNm) => {
-        const boundsWidth = Math.max(1, computedBounds.maxX - computedBounds.minX);
-        const boundsHeight = Math.max(1, computedBounds.maxY - computedBounds.minY);
-        const boundsSpan = Math.max(boundsWidth, boundsHeight);
-        return Math.max(0.65, Math.min(16, boundsSpan / Math.max(1, rangeNm)));
-      };
-
-      setRadarView({
-        centerX: center.x_nm,
-        centerY: center.y_nm,
-        zoom: zoomForScopeRange(defaultRange)
-      });
-
-      setSelectedCallsign(null);
-      setHoveredCallsign(null);
-      setTraceEvents(parsedTrace);
-      setCurrentTickIndex(0);
-      setLoadStatus(`Loaded ${parsedTrace.length} ticks. Score file optional.`);
+      applyParsedTrace(parsedTrace);
     } catch (err) {
       setLoadStatus(`Failed to parse files: ${err.message}`);
     }
-  }, []);
+  }, [applyParsedTrace]);
+
+  const loadLastRun = useCallback(() => {
+    const text = safeStorageGet(LAST_TRACE_KEY);
+    if (!text) {
+      setLoadStatus('No saved run found.');
+      return;
+    }
+    try {
+      const events = text.split('\n').filter(Boolean).map((line) => JSON.parse(line));
+      let savedScore = null;
+      try {
+        savedScore = JSON.parse(safeStorageGet(LAST_SCORE_KEY) || 'null');
+      } catch {
+        savedScore = null;
+      }
+      setCurrentMode('replay');
+      applyParsedTrace(events, `Loaded last saved run (${events.length} ticks).`);
+      setScore(savedScore && Object.keys(savedScore).length ? savedScore : null);
+    } catch (err) {
+      setLoadStatus(`Failed to load saved run: ${err.message}`);
+    }
+  }, [applyParsedTrace]);
 
   const loadScoreFile = useCallback(async (file) => {
     if (!file) return;
@@ -517,6 +583,14 @@ export default function useViewerState() {
     setSelectedCallsign(callsign || null);
   }, []);
 
+  const prefillCommand = useCallback((callsign) => {
+    setSelectedCallsign(callsign || null);
+    if (callsign) {
+      setCommandText(`${callsign} `);
+      setCommandFeedback({ status: null, message: '' });
+    }
+  }, []);
+
   // WebSocket Live transport integration
   const resolveLiveEndpoint = () => {
     return window.atcLiveEndpoint || DEFAULT_LIVE_ENDPOINT;
@@ -533,28 +607,67 @@ export default function useViewerState() {
   const handleLiveControlStatus = (payload) => {
     const status = payload.status || 'running';
     if (status === 'paused') setLivePaused(true);
-    if (status === 'running' || status === 'reset') setLivePaused(false);
-    if (status === 'ended') {
-      setLivePaused(true);
-      setLiveConnectionState(false);
+    if (status === 'running' || status === 'reset' || status === 'level_started') setLivePaused(false);
+    if (status === 'ended') setLivePaused(true);
+    if (status === 'unknown_level' || status === 'no_level') {
+      appendLiveLog(`Level request rejected (${humanize(status)}).`);
+      return;
     }
-    setLiveRunState(humanize(status));
-    appendLiveLog(`Simulation ${humanize(status)}.`);
+    if (status !== 'level_started') {
+      setLiveRunState(humanize(status));
+      appendLiveLog(`Simulation ${humanize(status)}.`);
+    }
     if (status === 'reset') {
       setLiveFollowTail(true);
-      liveResetPending.current = true;
     }
   };
 
-  const persistLiveRun = (payload) => {
-    const finalScore = payload.score || null;
+  const recordLevelResult = (payload) => {
+    const id = payload.scenario;
+    if (!id) return;
+    const value = Number(payload.score?.score ?? 0);
+    setBestResults((prev) => {
+      const existing = prev[id];
+      const merged = {
+        bestScore: Math.max(existing?.bestScore ?? 0, value),
+        stars: Math.max(existing?.stars ?? 0, payload.stars ?? 0),
+        lastOutcome: payload.debrief?.outcome || payload.outcome || 'unknown',
+        playedAt: new Date().toISOString()
+      };
+      const next = { ...prev, [id]: merged };
+      safeStorageSet(LEVEL_RESULTS_KEY, JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const persistLastRun = (payload) => {
     const traceJsonl = traceEventsRef.current.map((event) => JSON.stringify(event)).join('\n');
-    const scoreJson = JSON.stringify(finalScore || {}, null, 2);
-    localStorage.setItem('atc_last_trace_jsonl', traceJsonl);
-    localStorage.setItem('atc_last_score_json', scoreJson);
-    setScore(finalScore);
-    setCurrentMode('replay');
-    setLoadStatus('Level complete. Saved run locally and switched to replay mode.');
+    if (!traceJsonl || traceJsonl.length > MAX_PERSISTED_TRACE_CHARS) return;
+    const traceOk = safeStorageSet(LAST_TRACE_KEY, traceJsonl);
+    const scoreOk = safeStorageSet(LAST_SCORE_KEY, JSON.stringify(payload.score || {}, null, 2));
+    if (traceOk && scoreOk) setHasSavedRun(true);
+  };
+
+  const handleLevelComplete = (payload) => {
+    recordLevelResult(payload);
+    persistLastRun(payload);
+    setScore(payload.score || null);
+    setDebrief(payload);
+    setLiveRunState('Level complete');
+    const outcome = payload.debrief?.outcome || payload.outcome || 'complete';
+    appendLiveLog(`Level complete: ${humanize(outcome)} (${payload.stars ?? 0} stars).`);
+    setLoadStatus(`Level complete: ${humanize(outcome)}.`);
+  };
+
+  const clearLiveView = () => {
+    setTraceEvents([]);
+    setRadarBounds(null);
+    setCurrentTickIndex(0);
+    setSelectedCallsign(null);
+    setHoveredCallsign(null);
+    liveSnapshotsByCallsign.current.clear();
+    latestLiveArrivalMs.current = 0;
+    setLiveFollowTail(true);
   };
 
   const ingestLiveSnapshots = (event) => {
@@ -585,6 +698,20 @@ export default function useViewerState() {
   const handleLiveEnvelope = (payload) => {
     if (!payload) return;
     if (payload.session_id) setLiveSessionId(payload.session_id);
+    if (payload.type === 'level_list') {
+      setLevels(Array.isArray(payload.levels) ? payload.levels : []);
+      return;
+    }
+    if (payload.type === 'level_started') {
+      clearLiveView();
+      liveResetPending.current = false;
+      setCurrentLevel(payload.level || null);
+      setDebrief(null);
+      setLivePaused(false);
+      setLiveRunState('Running');
+      appendLiveLog(`Level started: ${payload.level?.name || 'unknown level'}.`);
+      return;
+    }
     if (payload.type === 'control_ack' || payload.type === 'control_status') {
       handleLiveControlStatus(payload);
       return;
@@ -594,12 +721,12 @@ export default function useViewerState() {
       const reason = extractCommandRejectionReason(payload);
       setCommandFeedback({
         status: payload.ok ? 'accepted' : 'rejected',
-        message: payload.ok ? 'Accepted: command applied.' : `Rejected: ${reason || 'command rejected'}.`
+        message: payload.ok ? 'Accepted: command read back.' : `Rejected: ${reason || 'command rejected'}.`
       });
       return;
     }
     if (payload.type === 'level_complete') {
-      persistLiveRun(payload);
+      handleLevelComplete(payload);
       return;
     }
     const event = payload.tick || payload;
@@ -664,6 +791,9 @@ export default function useViewerState() {
     setLiveLogEntries([]);
     liveLogIdRef.current = 0;
     setRadarScopeRangeNm(80);
+    setLevels(null);
+    setCurrentLevel(null);
+    setDebrief(null);
 
     if (endpoint.startsWith('ws://') || endpoint.startsWith('wss://')) {
       const socket = new WebSocket(endpoint);
@@ -673,10 +803,11 @@ export default function useViewerState() {
         setLiveConnectionState(true);
         setLiveFollowTail(true);
         setLivePaused(false);
-        setLiveRunState('Running');
+        setLiveRunState('Connected');
         appendLiveLog('Session started.');
         setLoadStatus(`Live connected: ${endpoint}`);
         socket.send(JSON.stringify({ type: 'subscribe_tick_stream' }));
+        socket.send(JSON.stringify({ type: 'list_levels' }));
       };
       
       socket.onmessage = (event) => {
@@ -737,17 +868,6 @@ export default function useViewerState() {
       setLiveRunState('Running');
       appendLiveLog('Resume requested.');
     } else if (type === 'reset') {
-      // Reset local view
-      setTraceEvents([]);
-      setScore(null);
-      setRadarBounds(null);
-      setCurrentTickIndex(0);
-      setSelectedCallsign(null);
-      setHoveredCallsign(null);
-      liveSnapshotsByCallsign.current.clear();
-      latestLiveArrivalMs.current = 0;
-      setLiveFollowTail(true);
-      liveResetPending.current = true;
       setLiveRunState('Resetting');
       appendLiveLog('Scenario reset requested.');
     } else if (type === 'end_session') {
@@ -755,6 +875,38 @@ export default function useViewerState() {
       appendLiveLog('End session requested.');
     }
   }, [liveSessionId]);
+
+  const startLevel = useCallback((levelId) => {
+    if (!levelId) return;
+    if (!liveSocketRef.current || liveSocketRef.current.readyState !== WebSocket.OPEN) {
+      setLoadStatus('Connect to the live server before starting a level.');
+      return;
+    }
+    setDebrief(null);
+    setScore(null);
+    liveResetPending.current = true;
+    liveSocketRef.current.send(JSON.stringify({ type: 'start_level', scenario: levelId, session_id: liveSessionId }));
+    appendLiveLog(`Requested level: ${levelId}.`);
+  }, [liveSessionId]);
+
+  const returnToLevelSelect = useCallback(() => {
+    setDebrief(null);
+    setCurrentLevel(null);
+    setScore(null);
+    clearLiveView();
+    if (liveSocketRef.current && liveSocketRef.current.readyState === WebSocket.OPEN) {
+      liveSocketRef.current.send(JSON.stringify({ type: 'list_levels', session_id: liveSessionId }));
+    }
+  }, [liveSessionId]);
+
+  const watchReplay = useCallback(() => {
+    if (debrief?.score) setScore(debrief.score);
+    setDebrief(null);
+    setCurrentLevel(null);
+    handleModeChange('replay');
+    setCurrentTickIndex(0);
+    setLoadStatus('Reviewing the finished level in replay mode.');
+  }, [debrief, handleModeChange]);
 
   // Command processing
   const parseCommandText = (rawText) => {
@@ -783,13 +935,45 @@ export default function useViewerState() {
     else if (/^(LAND|CLEAR LAND|CLEARED LAND|CLEAR TO LAND)$/.test(joined)) type = 'clear_to_land';
     else if (/^(TAKEOFF|TAKE OFF|CLEAR TAKEOFF|CLEAR FOR TAKEOFF)$/.test(joined)) type = 'clear_for_takeoff';
     else if (/^(GA|GO AROUND|GOAROUND)$/.test(joined)) type = 'go_around';
+    else if (/^(EXIT HOLD|CANCEL HOLD|LEAVE HOLD)$/.test(joined)) type = 'exit_hold';
+    else if (/^(RESUME|RESUME PROCEDURE|PROCEED|OWN NAV)$/.test(joined)) type = 'resume_procedure';
     else if (/^(HOLD SHORT|SHORT)$/.test(joined)) type = 'hold_short';
     else if (/^(HOLD|HOLD POS|HOLD POSITION|POSITION)$/.test(joined)) type = 'hold_position';
+    else if (/^HOLD(\s+AT)?\s+\S+/.test(joined)) type = 'hold_at_waypoint';
     if (!type) return { ok: false, reason: 'Unsupported command action.' };
+
+    if (type === 'hold_at_waypoint') {
+      const holdTokens = actionTokens.slice(1);
+      if (holdTokens[0] === 'AT') holdTokens.shift();
+      const fix = holdTokens.shift();
+      if (!fix) return { ok: false, reason: 'Provide a fix name, e.g. ARR1 HOLD ALPHA.' };
+      let turnDirection = 'right';
+      let holdAltitude = null;
+      holdTokens.forEach((token) => {
+        if (token === 'LEFT') turnDirection = 'left';
+        else if (token === 'RIGHT') turnDirection = 'right';
+        else if (/^\d+(\.\d+)?$/.test(token)) holdAltitude = Number(token);
+      });
+      const currentAircraft = currentEvent.state?.aircraft?.[aircraft];
+      const fallbackAltitude = currentAircraft
+        ? Math.max(1000, Math.round(Number(currentAircraft.altitude_ft) / 100) * 100)
+        : 5000;
+      return {
+        ok: true,
+        command: {
+          aircraft,
+          type,
+          waypoint: fix,
+          turn_direction: turnDirection,
+          leg_length_nm: 5,
+          hold_altitude_ft: holdAltitude ?? fallbackAltitude
+        }
+      };
+    }
 
     const schema = COMMAND_SCHEMA[type];
     const command = { aircraft, type };
-    if (schema.field) {
+    if (schema?.field) {
       if (!Number.isFinite(value)) return { ok: false, reason: `Provide ${schema.unitHint}.` };
       if (value < schema.min || value > schema.max) return { ok: false, reason: `${schema.label} must be ${schema.unitHint}.` };
       command[schema.field] = value;
@@ -887,6 +1071,11 @@ export default function useViewerState() {
     commandType,
     commandValue,
     commandFeedback,
+    levels,
+    currentLevel,
+    debrief,
+    bestResults,
+    hasSavedRun,
     loadStatus,
     isPlaying,
     playSpeed,
@@ -909,6 +1098,10 @@ export default function useViewerState() {
     setRadarView,
     loadTraceFile,
     loadScoreFile,
+    loadLastRun,
+    startLevel,
+    returnToLevelSelect,
+    watchReplay,
     stepTick,
     togglePlayback,
     setPlaySpeed,
@@ -916,6 +1109,7 @@ export default function useViewerState() {
     handleResetView,
     handleModeChange,
     selectAircraftForCommand,
+    prefillCommand,
     connectLiveTransport,
     disconnectLiveTransport,
     sendLiveControl,

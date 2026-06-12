@@ -146,6 +146,7 @@ def test_landing_sets_vacating_phase_and_release_time():
     world = load_world(resolve_scenario_path("scenarios/crossing_conflict_001.json"))
     arr = world.aircraft["ARR1"]
     arr.status = "on_final"
+    arr.clearance = "cleared_to_land"
     arr.x_nm = 0.0
     arr.y_nm = 0.0
     arr.altitude_ft = 200

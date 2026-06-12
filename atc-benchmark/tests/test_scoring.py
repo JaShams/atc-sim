@@ -102,6 +102,8 @@ def test_emergency_handling_affects_score(tmp_path):
     handled_world.aircraft["ARR_EMG"].x_nm = 0.0
     handled_world.aircraft["ARR_EMG"].y_nm = 0.0
     handled_world.aircraft["ARR_EMG"].altitude_ft = 200
+    # Align with runway 18 so the landing clearance is actually valid.
+    handled_world.aircraft["ARR_EMG"].heading_deg = 180.0
     handled = run(handled_world, EmergencyLandingAgent(), max_ticks=2, trace_path=tmp_path / "handled_trace.jsonl")
 
     unhandled_world = load_world(resolve_scenario_path("scenarios/emergency_priority_landing_001.json"))

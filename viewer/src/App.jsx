@@ -217,6 +217,9 @@ function FileControls({ state }) {
         Score JSON
         <input aria-label="Score JSON" type="file" accept=".json,application/json" onChange={(event) => state.loadScoreFile(event.target.files?.[0])} />
       </label>
+      <button type="button" disabled={!state.hasSavedRun} title="Reload the most recent finished live game" onClick={state.loadLastRun}>
+        Load last run
+      </button>
     </section>
   );
 }
@@ -350,6 +353,36 @@ function LiveSessionControls({ state }) {
   );
 }
 
+const COMMAND_CHEAT_SHEET = [
+  ['ARR1 HDG 090', 'Turn to heading 090'],
+  ['ARR1 ALT 4000', 'Climb or descend to 4,000 ft'],
+  ['ARR1 SPD 180', 'Adjust speed to 180 kt'],
+  ['ARR1 LAND', 'Clear to land (must be aligned)'],
+  ['DEP1 TAKEOFF', 'Clear for takeoff'],
+  ['ARR1 GA', 'Go around'],
+  ['ARR1 HOLD ALPHA', 'Hold at fix ALPHA (right turns)'],
+  ['ARR1 HOLD ALPHA LEFT 6000', 'Hold at ALPHA, left turns, 6,000 ft'],
+  ['ARR1 EXIT HOLD', 'Leave the holding pattern'],
+  ['ARR1 RESUME', 'Resume the published procedure']
+];
+
+function CommandCheatSheet() {
+  return (
+    <DisclosurePanel className="command-cheat-sheet" title="Command reference">
+      <table>
+        <tbody>
+          {COMMAND_CHEAT_SHEET.map(([syntax, meaning]) => (
+            <tr key={syntax}>
+              <td><code>{syntax}</code></td>
+              <td>{meaning}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </DisclosurePanel>
+  );
+}
+
 function LiveControlPanel({ state }) {
   if (state.currentMode !== 'live') return null;
   return (
@@ -376,24 +409,102 @@ function LiveControlPanel({ state }) {
             />
             <button className="send-command" type="button" onClick={state.sendLiveCommand} disabled={!state.liveConnectionState}>Send</button>
           </div>
-          <p className="muted command-hint">Type commands like ARR1 HDG 090, ARR2 LAND, or DEP1 TAKEOFF.</p>
+          <p className="muted command-hint">Click a flight strip to pick an aircraft, then type a command.</p>
           <p className={`command-feedback ${state.commandFeedback.status || ''}`} role="status" aria-live="polite">
             {state.commandFeedback.message}
           </p>
+          <CommandCheatSheet />
         </article>
       </div>
     </section>
   );
 }
 
+function ScoreHud({ state, event }) {
+  const running = event?.running_score;
+  if (state.currentMode !== 'live' || !running) return null;
+  const previous = state.traceEvents[state.currentTickIndex - 1]?.running_score?.score;
+  const scoreValue = Number(running.score ?? 0);
+  const delta = Number.isFinite(previous) ? scoreValue - previous : 0;
+  const landings = running.efficiency?.successful_landings ?? 0;
+  const departures = running.efficiency?.successful_departures ?? 0;
+  const lossSep = running.safety?.loss_of_separation ?? 0;
+  return (
+    <section className="score-hud overlay-panel" aria-label="Running score">
+      <div className="score-hud-main">
+        <span className="eyebrow">Score</span>
+        <b>{formatNum(scoreValue)}</b>
+        {delta !== 0 && (
+          <span key={event.tick_id} className={`score-delta ${delta > 0 ? 'gain' : 'loss'}`}>
+            {formatSigned(delta)}
+          </span>
+        )}
+      </div>
+      <div className="score-hud-stats">
+        <span title="Successful landings">LDG {landings}</span>
+        <span title="Successful departures">DEP {departures}</span>
+        <span title="Loss of separation ticks" className={lossSep ? 'bad' : ''}>LoS {lossSep}</span>
+      </div>
+    </section>
+  );
+}
+
+function FlightStrips({ state, event }) {
+  const aircraft = Object.values(event?.state?.aircraft || {});
+  const conflictSet = aircraftSetFromRecords(event?.conflicts || []);
+  const predictedSet = aircraftSetFromRecords(event?.predicted_conflicts || []);
+  if (!aircraft.length) return <p className="muted">No aircraft in this live session.</p>;
+  return (
+    <div className="flight-strips">
+      {aircraft.map((ac) => {
+        const role = String(ac.role || '').toLowerCase();
+        const isSelected = state.selectedCallsign === ac.callsign;
+        const classes = ['flight-strip', role];
+        if (isSelected) classes.push('selected');
+        if (conflictSet.has(ac.callsign)) classes.push('critical');
+        else if (predictedSet.has(ac.callsign) || ac.emergency) classes.push('warn');
+        return (
+          <button
+            key={ac.callsign}
+            type="button"
+            className={classes.join(' ')}
+            onClick={() => (isSelected ? state.selectAircraftForCommand(null) : state.prefillCommand(ac.callsign))}
+          >
+            <span className="strip-title">
+              <b>{ac.callsign}</b>
+              <span>{humanize(role || 'aircraft')}</span>
+            </span>
+            <span className="strip-state">
+              {Math.round(ac.altitude_ft)} ft · {Math.round(ac.speed_kt)} kt · HDG {Math.round(ac.heading_deg)}
+            </span>
+            <span className="strip-clearance">
+              {ac.emergency ? 'EMERGENCY · ' : ''}{ac.clearance ? humanize(ac.clearance) : humanize(ac.status || 'airborne')}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function LiveDashboard({ state, event }) {
-  const [activeTab, setActiveTab] = useState('alerts');
+  const [activeTab, setActiveTab] = useState('strips');
   if (state.currentMode !== 'live') return null;
   const aircraft = Object.values(event?.state?.aircraft || {});
   const emergencies = aircraft.filter((ac) => ac.emergency).length;
   return (
     <aside className="live-game-layout" aria-label="Live game dashboard">
       <div className="live-sidebar-tabs" role="tablist" aria-label="Live sidebar">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'strips'}
+          aria-controls="liveStripsPanel"
+          id="liveStripsTab"
+          onClick={() => setActiveTab('strips')}
+        >
+          Strips
+        </button>
         <button
           type="button"
           role="tab"
@@ -416,11 +527,14 @@ function LiveDashboard({ state, event }) {
         </button>
       </div>
       <div className="live-sidebar-body">
-        {activeTab === 'alerts' ? (
-          <LiveAlerts event={event} emergencies={emergencies} />
-        ) : (
-          <LiveEventLog entries={state.liveLogEntries} />
+        {activeTab === 'strips' && (
+          <article id="liveStripsPanel" className="panel live-strips-card" role="tabpanel" aria-labelledby="liveStripsTab">
+            <SectionHeading eyebrow="Traffic" title="Flight Strips" />
+            <FlightStrips state={state} event={event} />
+          </article>
         )}
+        {activeTab === 'alerts' && <LiveAlerts event={event} emergencies={emergencies} />}
+        {activeTab === 'log' && <LiveEventLog entries={state.liveLogEntries} />}
       </div>
       <LiveControlPanel state={state} />
     </aside>
@@ -660,7 +774,7 @@ function TimelinePanel({ state, embedded = false }) {
       if (state.filterHurt && outcome !== 'hurt') return;
       if (state.filterSafety && !isSafetyTriggeredCall(event, explanation)) return;
       if (state.filterLargeDelta && Math.abs(immediateDelta) < 0.05) return;
-      const rowKey = `${event.session_id || 'trace'}-${event.tick_id ?? event.time ?? primaryReason(event)}`;
+      const rowKey = `${event.session_id || 'trace'}-${event.tick_id ?? event.time ?? primaryReason(event)}-${index}`;
       filteredRows.push({ event, index, explanation, componentTotals: previousTotals, rowKey });
     });
     return filteredRows;
@@ -804,12 +918,128 @@ function ReplaySidebar({ state, event }) {
   );
 }
 
+function Stars({ count, max = 3 }) {
+  return (
+    <span className="stars" aria-label={`${count} of ${max} stars`}>
+      {Array.from({ length: max }, (_, idx) => (
+        <span key={idx} className={idx < count ? 'star earned' : 'star'} aria-hidden="true">
+          {idx < count ? '★' : '☆'}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function LevelSelect({ state }) {
+  const showLobby = state.liveConnectionState
+    && !state.debrief
+    && !state.currentLevel
+    && state.traceEvents.length === 0;
+  if (!showLobby) return null;
+  return (
+    <section className="level-select-panel overlay-panel" aria-label="Level select">
+      <SectionHeading eyebrow="Tower" title="Choose a Level" />
+      {!state.levels && <p className="muted">Loading levels…</p>}
+      {state.levels && !state.levels.length && <p className="muted">No scenarios found on the server.</p>}
+      <div className="level-grid">
+        {(state.levels || []).map((level) => {
+          const best = state.bestResults[level.id];
+          return (
+            <button
+              key={level.id}
+              type="button"
+              className="level-card"
+              onClick={() => state.startLevel(level.id)}
+            >
+              <span className="level-card-head">
+                <b>{level.name}</b>
+                {level.difficulty_tier && <span className="chip">{humanize(level.difficulty_tier)}</span>}
+              </span>
+              <span className="level-card-traffic">
+                {countPhrase(level.arrivals ?? 0, 'arrival')} · {countPhrase(level.departures ?? 0, 'departure')}
+                {level.has_events ? ' · scripted events' : ''}
+              </span>
+              {level.description && <span className="level-card-desc">{level.description}</span>}
+              {(level.tags || []).length > 0 && (
+                <span className="level-card-tags">{level.tags.slice(0, 3).map(humanize).join(', ')}</span>
+              )}
+              <span className="level-card-best">
+                {best ? (
+                  <>
+                    <Stars count={best.stars ?? 0} />
+                    <span>Best {formatNum(best.bestScore)}</span>
+                  </>
+                ) : (
+                  <span className="muted">Not played yet</span>
+                )}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function DebriefOverlay({ state }) {
+  const debrief = state.debrief;
+  if (!debrief) return null;
+  const verdict = debrief.debrief?.outcome || debrief.outcome || 'complete';
+  const scoreValue = Number(debrief.score?.score ?? 0);
+  const breakdown = Object.entries(debrief.score?.score_breakdown || {}).filter(([, value]) => Number(value) !== 0);
+  const details = debrief.debrief?.details || [];
+  return (
+    <div className="debrief-overlay" role="dialog" aria-label="Mission debrief">
+      <article className={`debrief-card outcome-${verdict}`}>
+        <p className="eyebrow">Mission debrief</p>
+        <h2>{humanize(verdict)}</h2>
+        <Stars count={debrief.stars ?? 0} />
+        <div className="debrief-score">
+          <span>Final score</span>
+          <b>{formatNum(scoreValue)}</b>
+        </div>
+        {details.length > 0 && (
+          <ul className="debrief-details">
+            {details.map((line) => <li key={line}>{line}</li>)}
+          </ul>
+        )}
+        {breakdown.length > 0 && (
+          <ul className="debrief-breakdown">
+            {breakdown.map(([key, value]) => (
+              <li key={key}><b>{humanizeLabel(key)}</b>: {formatSigned(Number(value))}</li>
+            ))}
+          </ul>
+        )}
+        <div className="debrief-actions">
+          <button type="button" onClick={() => state.startLevel(debrief.scenario)}>Play again</button>
+          <button type="button" onClick={state.watchReplay}>Watch replay</button>
+          <button type="button" onClick={state.returnToLevelSelect}>Choose level</button>
+        </div>
+      </article>
+    </div>
+  );
+}
+
+function PauseOverlay({ state }) {
+  if (state.currentMode !== 'live' || !state.livePaused || state.debrief) return null;
+  return (
+    <div className="pause-overlay" aria-label="Simulation paused">
+      <b>PAUSED</b>
+      <span>Resume to continue controlling traffic.</span>
+    </div>
+  );
+}
+
 function LiveLayout({ state, event }) {
   return (
     <section className="live-overlay-layer workspace-overlay" aria-label="Live mode workspace">
       <LiveSessionControls state={state} />
+      <ScoreHud state={state} event={event} />
       <LiveDashboard state={state} event={event} />
       <LiveRadarControls state={state} />
+      <PauseOverlay state={state} />
+      <LevelSelect state={state} />
+      <DebriefOverlay state={state} />
     </section>
   );
 }

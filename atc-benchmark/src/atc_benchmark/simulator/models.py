@@ -35,6 +35,9 @@ class Aircraft:
     target_runway: str | None = None
     clearance: str | None = None
     target_altitude_ft: float | None = None
+    target_heading_deg: float | None = None
+    target_speed_kt: float | None = None
+    takeoff_roll_until_sec: int | None = None
     emergency: bool = False
     ready_time_sec: int | None = None
     takeoff_time_sec: int | None = None
@@ -107,6 +110,16 @@ class RulesConfig:
     restricted_zones: list[dict[str, Any]] = field(default_factory=list)
     pilot_readback_delay_sec: dict[str, int] = field(default_factory=lambda: {"min": 0, "max": 0})
     command_delay_seed: int | None = None
+    # Smooth kinematics (opt-in per scenario; None keeps instant changes).
+    default_turn_rate_deg_per_sec: float | None = None
+    speed_change_rate_kt_per_sec: float | None = None
+    # Takeoff roll (opt-in; 0 keeps the legacy instant liftoff).
+    takeoff_roll_sec: int = 0
+    takeoff_rotation_speed_kt: float = 140.0
+    takeoff_acceleration_kt_per_sec: float = 5.0
+    climb_out_altitude_ft: float = 4000.0
+    climb_out_speed_kt: float = 250.0
+    airspace_exit_distance_nm: float = 30.0
 
 
 @dataclass
@@ -127,6 +140,7 @@ class ScoringConfig:
     emergency_priority_compliance_reward: float = 2.5
     emergency_priority_violation_penalty: float = -4.0
     restricted_zone_violation_penalty: float = -10.0
+    runway_incursion_penalty: float = -15.0
 
 
 @dataclass

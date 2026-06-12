@@ -292,6 +292,30 @@ export default function RadarStage({
     return Object.fromEntries(interpolatedAircraft.map((ac) => [ac.callsign, ac]));
   }, [interpolatedAircraft]);
 
+  // Position-history trails from the last few ticks.
+  const trails = useMemo(() => {
+    const map = new Map();
+    const start = Math.max(0, currentTickIndex - 10);
+    for (let i = start; i <= currentTickIndex; i += 1) {
+      const tickAircraft = traceEvents[i]?.state?.aircraft || {};
+      for (const [callsign, ac] of Object.entries(tickAircraft)) {
+        const x = Number(ac.x_nm);
+        const y = Number(ac.y_nm);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+        if (!map.has(callsign)) map.set(callsign, []);
+        map.get(callsign).push({ x_nm: x, y_nm: y });
+      }
+    }
+    return map;
+  }, [traceEvents, currentTickIndex]);
+
+  // Pixel radius for a given world-space distance at the current zoom.
+  const pixelRadiusForNm = useCallback((nm) => {
+    const origin = projectPoint(0, 0);
+    const offset = projectPoint(nm, 0);
+    return Math.abs(offset.x - origin.x);
+  }, [projectPoint]);
+
   return (
     <div ref={containerRef} className="konva-radar" style={{ position: 'relative' }}>
       <Stage
@@ -311,6 +335,9 @@ export default function RadarStage({
 
           {/* Grid lines */}
           <RadarGrid width={size.width} height={size.height} />
+
+          {/* Range rings around the field */}
+          <RangeRings projectPoint={projectPoint} pixelRadiusForNm={pixelRadiusForNm} />
 
           {/* Runway Header Info */}
           <Text
@@ -350,6 +377,43 @@ export default function RadarStage({
               byCallsign={byCallsign}
               projectPoint={projectPoint}
               color={palette.conflict}
+            />
+          )}
+
+          {/* Position-history trails */}
+          {interpolatedAircraft.map((ac) => {
+            if (ac.status === 'landed' || ac.status === 'exited_airspace') return null;
+            const history = trails.get(ac.callsign);
+            if (!history || history.length < 2) return null;
+            const isDeparture = String(ac.role || '').toLowerCase() === 'departure';
+            const trailColor = isDeparture ? '255, 178, 63' : '34, 244, 255';
+            return (
+              <Group key={`trail-${ac.callsign}`}>
+                {history.slice(0, -1).map((point, idx) => {
+                  const { x, y } = projectPoint(point.x_nm, point.y_nm);
+                  const alpha = 0.08 + 0.32 * (idx / history.length);
+                  return (
+                    <Circle
+                      key={`trail-${ac.callsign}-${idx}`}
+                      x={x}
+                      y={y}
+                      radius={1.6}
+                      fill={`rgba(${trailColor}, ${alpha.toFixed(2)})`}
+                    />
+                  );
+                })}
+              </Group>
+            );
+          })}
+
+          {/* Separation ring around the selected aircraft */}
+          {selectedCallsign && byCallsign[selectedCallsign]
+            && byCallsign[selectedCallsign].status !== 'landed'
+            && byCallsign[selectedCallsign].status !== 'exited_airspace' && (
+            <SeparationRing
+              aircraft={byCallsign[selectedCallsign]}
+              projectPoint={projectPoint}
+              pixelRadiusForNm={pixelRadiusForNm}
             />
           )}
 
@@ -460,6 +524,50 @@ function RadarGrid({ width, height }) {
   return <>{gridLines}</>;
 }
 
+function RangeRings({ projectPoint, pixelRadiusForNm }) {
+  const center = projectPoint(0, 0);
+  return (
+    <Group>
+      {[10, 20, 30, 40].map((nm) => {
+        const radius = pixelRadiusForNm(nm);
+        if (!Number.isFinite(radius) || radius < 12) return null;
+        return (
+          <Group key={`ring-${nm}`}>
+            <Circle x={center.x} y={center.y} radius={radius} stroke="rgba(180, 198, 210, 0.08)" strokeWidth={1} />
+            <Text
+              x={center.x + 4}
+              y={center.y - radius + 4}
+              text={`${nm}`}
+              fill="rgba(180, 198, 210, 0.22)"
+              fontFamily='"JetBrains Mono", "Fira Code", Consolas, monospace'
+              fontSize={9}
+            />
+          </Group>
+        );
+      })}
+    </Group>
+  );
+}
+
+function SeparationRing({ aircraft, projectPoint, pixelRadiusForNm }) {
+  const { x, y } = projectPoint(aircraft.x_nm, aircraft.y_nm);
+  const radius = pixelRadiusForNm(3);
+  if (!Number.isFinite(radius) || radius < 6) return null;
+  return (
+    <Group>
+      <Circle x={x} y={y} radius={radius} stroke="rgba(34, 244, 255, 0.28)" strokeWidth={1} dash={[5, 6]} />
+      <Text
+        x={x + radius * 0.72}
+        y={y - radius * 0.72}
+        text="3nm"
+        fill="rgba(34, 244, 255, 0.4)"
+        fontFamily='"JetBrains Mono", "Fira Code", Consolas, monospace'
+        fontSize={9}
+      />
+    </Group>
+  );
+}
+
 function ConflictLines({ records = [], byCallsign, projectPoint, color, dash }) {
   return (
     <>
@@ -471,14 +579,31 @@ function ConflictLines({ records = [], byCallsign, projectPoint, color, dash }) 
         if (!a || !b) return null;
         const ptA = projectPoint(a.x_nm, a.y_nm);
         const ptB = projectPoint(b.x_nm, b.y_nm);
+        const actual = Number(record.horizontal_nm);
+        const required = Number(record.required_horizontal_nm);
+        const separationLabel = Number.isFinite(actual)
+          ? `${actual.toFixed(1)}${Number.isFinite(required) ? `/${required.toFixed(0)}` : ''}nm`
+          : null;
         return (
-          <Line
-            key={`conflict-${index}`}
-            points={[ptA.x, ptA.y, ptB.x, ptB.y]}
-            stroke={color}
-            strokeWidth={dash ? 1 : 2}
-            dash={dash}
-          />
+          <Group key={`conflict-${index}`}>
+            <Line
+              points={[ptA.x, ptA.y, ptB.x, ptB.y]}
+              stroke={color}
+              strokeWidth={dash ? 1 : 2}
+              dash={dash}
+            />
+            {separationLabel && (
+              <Text
+                x={(ptA.x + ptB.x) / 2 + 6}
+                y={(ptA.y + ptB.y) / 2 - 12}
+                text={separationLabel}
+                fill={color}
+                fontFamily='"JetBrains Mono", "Fira Code", Consolas, monospace'
+                fontSize={10}
+                fontStyle="600"
+              />
+            )}
+          </Group>
         );
       })}
     </>

@@ -30,6 +30,14 @@ NUMERIC_RULES = {
     "max_speed_kt",
     "lookahead_seconds",
     "runway_arrival_protection_nm",
+    "default_turn_rate_deg_per_sec",
+    "speed_change_rate_kt_per_sec",
+    "takeoff_roll_sec",
+    "takeoff_rotation_speed_kt",
+    "takeoff_acceleration_kt_per_sec",
+    "climb_out_altitude_ft",
+    "climb_out_speed_kt",
+    "airspace_exit_distance_nm",
 }
 
 

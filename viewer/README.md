@@ -1,18 +1,46 @@
-# ATC Trace Replay Viewer (v1)
+# ATC Viewer
 
-Minimal static browser viewer for existing benchmark outputs.
+React + Konva client for the ATC benchmark: a live game UI and a trace replay viewer.
 
-## Usage
+## Run
 
-1. Generate outputs with `atc-run` to produce:
-   - trace JSONL (default `outputs/traces/trace.jsonl`)
-   - score JSON (default `outputs/score.json`)
-2. Open `viewer/index.html` in a browser.
-3. Load the trace file using the file picker. The score file is optional.
-4. Scrub ticks with the timeline slider.
+From the repository root:
 
-## Scope
+```bash
+npm install
+npm run dev
+```
 
-- Read-only replay and score inspection.
-- No simulation controls or backend.
-- Deterministic rendering from trace/score files only.
+Open the printed URL (default `http://127.0.0.1:14173`).
+
+## Modes
+
+### Live mode
+
+Start the game server first (see the root README):
+
+```bash
+cd atc-benchmark
+atc-live --port 8080
+```
+
+Switch the viewer to Live mode and click `Start`. You get a level-select
+lobby, flight strips, a running score HUD, a text command line (see the
+in-app command reference), and a mission debrief with stars when the level
+ends. Best scores are stored locally per level.
+
+### Replay mode
+
+Load a trace JSONL (from `atc-run`, `atc-batch`, or a finished live game's
+artifacts) plus an optional score JSON, or click `Load last run` to reload
+the most recent finished live game. Scrub the timeline, inspect ticks,
+aircraft, and score component changes.
+
+## Tests
+
+```bash
+npm run test:e2e
+```
+
+Playwright drives a real `atc-live` server; the Python venv at `.venv/` must
+have the package installed with the `live` extra.
