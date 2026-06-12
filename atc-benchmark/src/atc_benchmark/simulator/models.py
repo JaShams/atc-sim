@@ -15,6 +15,7 @@ ALLOWED_ACTION_TYPES = {
     "hold_at_waypoint",
     "exit_hold",
     "resume_procedure",
+    "handoff_to_center",
     "no_op",
 }
 
@@ -70,6 +71,8 @@ class Aircraft:
     hold_phase: str | None = None
     hold_leg_progress_nm: float = 0.0
     hold_turn_remaining_deg: float = 0.0
+    handed_off: bool = False
+    handoff_time_sec: int | None = None
 
 
 @dataclass
@@ -120,6 +123,12 @@ class RulesConfig:
     climb_out_altitude_ft: float = 4000.0
     climb_out_speed_kt: float = 250.0
     airspace_exit_distance_nm: float = 30.0
+    # Final approach geometry: cleared arrivals track the glidepath to the
+    # threshold; clearance is rejected when too high to capture it.
+    approach_glideslope_ft_per_nm: float = 320.0
+    approach_max_intercept_above_glideslope_ft: float = 1200.0
+    # Departures must be handed to center before leaving the airspace.
+    handoff_min_distance_nm: float = 15.0
 
 
 @dataclass
@@ -141,6 +150,8 @@ class ScoringConfig:
     emergency_priority_violation_penalty: float = -4.0
     restricted_zone_violation_penalty: float = -10.0
     runway_incursion_penalty: float = -15.0
+    handoff_completed_reward: float = 1.0
+    missed_handoff_penalty: float = -2.0
 
 
 @dataclass

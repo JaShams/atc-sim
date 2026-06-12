@@ -41,6 +41,9 @@ def _angle_delta_deg(a: float, b: float) -> float:
 
 
 def _runway_is_wind_compliant(world: WorldState, threshold_deg: float = 45.0) -> bool:
+    # Calm wind favors no runway; direction is meaningless below ~5 kt.
+    if world.weather.wind_speed_kt < 5:
+        return True
     heading = _runway_heading_deg(world.airport.active_runway)
     return _angle_delta_deg(world.weather.wind_dir_deg, heading) < threshold_deg
 
@@ -194,12 +197,40 @@ def _adjust_speed_toward_target(world: WorldState, ac: Aircraft) -> None:
         ac.speed_kt += math.copysign(max_delta, delta)
 
 
+def _fly_final_approach(world: WorldState, ac: Aircraft) -> None:
+    """Track the cleared aircraft down the final approach to the threshold.
+
+    Steers toward the runway threshold and descends along the configured
+    glidepath; an aircraft below the path stays level until it captures it.
+    """
+    dist_nm = math.hypot(ac.x_nm, ac.y_nm)
+    if dist_nm > 0.1:
+        bearing = (math.degrees(math.atan2(-ac.x_nm, -ac.y_nm)) + 360) % 360
+        if _effective_turn_rate(world, ac) is None:
+            ac.heading_deg = bearing
+            ac.target_heading_deg = None
+        else:
+            ac.target_heading_deg = bearing
+    glidepath_ft = dist_nm * world.rules.approach_glideslope_ft_per_nm
+    if ac.altitude_ft > glidepath_ft:
+        catch_up_fpm = (ac.altitude_ft - glidepath_ft) * 60.0 / world.tick_sec
+        path_fpm = ac.speed_kt * world.rules.approach_glideslope_ft_per_nm / 60.0
+        descent_limit_fpm = ac.max_descent_fpm if ac.max_descent_fpm is not None else 1500.0
+        ac.vertical_rate_fpm = -min(descent_limit_fpm, max(path_fpm, catch_up_fpm))
+        ac.target_altitude_ft = glidepath_ft
+    else:
+        ac.vertical_rate_fpm = 0.0
+        ac.target_altitude_ft = None
+
+
 def advance(world: WorldState) -> list[dict]:
     events: list[dict] = []
     dt_hr = world.tick_sec / 3600
     for ac in world.aircraft.values():
         _update_managed_route(world, ac)
         if ac.status in {"airborne", "on_final", "go_around", "rolling", "airborne_departure", "holding"}:
+            if ac.role == "arrival" and ac.clearance == "cleared_to_land" and ac.status == "on_final":
+                _fly_final_approach(world, ac)
             _turn_toward_target_heading(world, ac)
             _adjust_speed_toward_target(world, ac)
             rad = math.radians(ac.heading_deg)
@@ -279,13 +310,13 @@ def advance(world: WorldState) -> list[dict]:
                         ac.speed_kt + world.rules.takeoff_acceleration_kt_per_sec * world.tick_sec,
                     )
                 else:
-                    if ac.takeoff_roll_until_sec is not None:
-                        # Rotate: lift off at rotation speed and start the climb-out.
-                        ac.takeoff_roll_until_sec = None
-                        ac.speed_kt = max(ac.speed_kt, world.rules.takeoff_rotation_speed_kt)
-                        ac.target_speed_kt = world.rules.climb_out_speed_kt
-                        ac.vertical_rate_fpm = 2000
-                        ac.target_altitude_ft = world.rules.climb_out_altitude_ft
+                    # Rotate: lift off at rotation speed and start the climb-out
+                    # (with takeoff_roll_sec == 0 this happens one tick after clearance).
+                    ac.takeoff_roll_until_sec = None
+                    ac.speed_kt = max(ac.speed_kt, world.rules.takeoff_rotation_speed_kt)
+                    ac.target_speed_kt = world.rules.climb_out_speed_kt
+                    ac.vertical_rate_fpm = 2000
+                    ac.target_altitude_ft = world.rules.climb_out_altitude_ft
                     ac.status = "airborne_departure"
                     ac.takeoff_time_sec = world.time_sec + world.tick_sec
         exit_nm = world.rules.airspace_exit_distance_nm
@@ -415,11 +446,11 @@ def apply_actions(world: WorldState, actions: list[dict]) -> dict:
             ac.status = "rolling"
             if ac.ready_time_sec is None:
                 ac.ready_time_sec = world.time_sec
+            ac.heading_deg = _runway_heading_deg(world.airport.active_runway) % 360
+            ac.target_heading_deg = None
             roll_sec = world.rules.takeoff_roll_sec
             if roll_sec > 0:
                 ac.takeoff_roll_until_sec = world.time_sec + roll_sec
-                ac.heading_deg = _runway_heading_deg(world.airport.active_runway) % 360
-                ac.target_heading_deg = None
             world.airport.runway_occupied_by = ac.callsign
             world.airport.runway_phase = "takeoff_roll"
             world.airport.runway_occupied_until_sec = world.time_sec + max(TAKEOFF_RUNWAY_OCCUPANCY_SEC, roll_sec)
@@ -472,6 +503,9 @@ def apply_actions(world: WorldState, actions: list[dict]) -> dict:
             ac.manual_override_until_sec = None
             ac.target_heading_deg = None
             ac.target_speed_kt = None
+        elif t == "handoff_to_center":
+            ac.handed_off = True
+            ac.handoff_time_sec = world.time_sec
     return {"go_around_count": go_arounds}
 
 
@@ -613,6 +647,8 @@ def _build_score_result(
     departure_delay = sum(max(0, (a.takeoff_time_sec or world.time_sec) - a.ideal_takeoff_time_sec) for a in departures if a.ideal_takeoff_time_sec is not None)
     emergency_handled_count = sum(1 for a in arrivals if a.emergency and a.status == "landed")
     emergency_unhandled_count = sum(1 for a in arrivals if a.emergency and a.status != "landed")
+    handoffs_completed = sum(1 for a in departures if a.handed_off)
+    missed_handoffs = sum(1 for a in departures if a.status == "exited_airspace" and not a.handed_off)
     scoring = world.scoring
     score_breakdown = {
         ScoreComponentId.BASE_SCORE: scoring.base_score,
@@ -634,6 +670,8 @@ def _build_score_result(
         ),
         ScoreComponentId.RESTRICTED_ZONE_VIOLATION: restricted_zone_violation_count * scoring.restricted_zone_violation_penalty,
         ScoreComponentId.RUNWAY_INCURSION: runway_incursion_count * scoring.runway_incursion_penalty,
+        ScoreComponentId.HANDOFF_COMPLETED: handoffs_completed * scoring.handoff_completed_reward,
+        ScoreComponentId.MISSED_HANDOFF: missed_handoffs * scoring.missed_handoff_penalty,
     }
     raw_score = sum(score_breakdown.values())
     simulated_hours = world.time_sec / 3600 if world.time_sec > 0 else 0.0
@@ -674,6 +712,8 @@ def _build_score_result(
             "runway_incursion_count": runway_incursion_count,
             "emergency_handled_by_type": emergency_handled_by_type or {},
             "emergency_unhandled_by_type": emergency_unhandled_by_type or {},
+            "handoffs_completed_count": handoffs_completed,
+            "missed_handoffs_count": missed_handoffs,
         },
     }
     if manifest is not None:
@@ -818,6 +858,8 @@ class SimulationStepper:
             ScoreComponentId.EMERGENCY_PRIORITY_COMPLIANCE: 0.0,
             ScoreComponentId.RESTRICTED_ZONE_VIOLATION: 0.0,
             ScoreComponentId.RUNWAY_INCURSION: 0.0,
+            ScoreComponentId.HANDOFF_COMPLETED: 0.0,
+            ScoreComponentId.MISSED_HANDOFF: 0.0,
         }
         self.tick_records: list[dict] = []
         self.pending_commands: list[dict] = []

@@ -54,7 +54,9 @@ def _world_for_predicted_conflict_tests() -> WorldState:
         time_sec=0,
         tick_sec=5,
         airport=AirportState(runway_id="27", active_runway="27"),
-        weather=Weather(),
+        # Real crosswind keeps the wind_runway_mismatch decision point firing
+        # every tick so scripted agents are invoked on a fixed cadence.
+        weather=Weather(wind_dir_deg=0, wind_speed_kt=10),
         rules=RulesConfig(lookahead_seconds=60, min_horizontal_nm=3.0, min_vertical_ft=1000.0),
         aircraft={
             "A1": Aircraft(callsign="A1", role="arrival", x_nm=0.0, y_nm=-5.0, altitude_ft=5000, speed_kt=240, heading_deg=0, status="airborne"),

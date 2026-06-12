@@ -107,7 +107,7 @@ class LLMAgent:
             f"- runway_state: {json.dumps(snapshot.get('airport', {}), sort_keys=True)}\n"
             f"- weather: {json.dumps(snapshot.get('weather', {}), sort_keys=True)}\n"
             "Allowed action schema:\n"
-            "{\"actions\": [{\"aircraft\": str, \"type\": one_of(assign_heading, assign_altitude, assign_speed, clear_to_land, clear_for_takeoff, go_around, hold_short, hold_position, no_op), \"heading\"?: number, \"altitude_ft\"?: number, \"speed_kt\"?: number}]}\n"
+            "{\"actions\": [{\"aircraft\": str, \"type\": one_of(assign_heading, assign_altitude, assign_speed, clear_to_land, clear_for_takeoff, go_around, hold_short, hold_position, handoff_to_center, no_op), \"heading\"?: number, \"altitude_ft\"?: number, \"speed_kt\"?: number}]}\n"
             "Return ONLY JSON. Do not include markdown, prose, or code fences."
         )
 

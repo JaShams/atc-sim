@@ -35,6 +35,8 @@ class ScoreComponentId:
     EMERGENCY_PRIORITY_COMPLIANCE = "emergency_priority_compliance"
     RESTRICTED_ZONE_VIOLATION = "restricted_zone_violation"
     RUNWAY_INCURSION = "runway_incursion"
+    HANDOFF_COMPLETED = "handoff_completed"
+    MISSED_HANDOFF = "missed_handoff"
 
 
 @dataclass

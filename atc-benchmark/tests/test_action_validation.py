@@ -132,6 +132,7 @@ def test_every_allowed_action_is_applied_or_explicitly_rejected():
         },
         "exit_hold": {"aircraft": "ARR1", "type": "exit_hold"},
         "resume_procedure": {"aircraft": "ARR1", "type": "resume_procedure"},
+        "handoff_to_center": {"aircraft": "DEP1", "type": "handoff_to_center"},
         "no_op": {"aircraft": "ARR1", "type": "no_op"},
     }
     engine_applied_types = {
@@ -146,6 +147,7 @@ def test_every_allowed_action_is_applied_or_explicitly_rejected():
         "hold_at_waypoint",
         "exit_hold",
         "resume_procedure",
+        "handoff_to_center",
         "no_op",
     }
 
