@@ -11,6 +11,42 @@ def test_invalid_heading_rejected():
     assert invalid and invalid[0]["reason"] == "invalid_heading"
 
 
+def test_non_numeric_assignment_fields_are_rejected():
+    world = load_world(resolve_scenario_path("scenarios/crossing_conflict_001.json"))
+    world.airport.layout = {"waypoints": [{"id": "HOLD1", "x_nm": -5.0, "y_nm": 5.0}]}
+    cases = [
+        ({"aircraft": "ARR1", "type": "assign_heading", "heading": "090"}, "invalid_heading"),
+        ({"aircraft": "ARR1", "type": "assign_altitude", "altitude_ft": "3000"}, "invalid_altitude"),
+        ({"aircraft": "ARR1", "type": "assign_speed", "speed_kt": "210"}, "invalid_speed"),
+        (
+            {
+                "aircraft": "ARR1",
+                "type": "hold_at_waypoint",
+                "waypoint": "HOLD1",
+                "leg_length_nm": "3",
+                "turn_direction": "right",
+                "hold_altitude_ft": 4000,
+            },
+            "invalid_leg_length",
+        ),
+        (
+            {
+                "aircraft": "ARR1",
+                "type": "hold_at_waypoint",
+                "waypoint": "HOLD1",
+                "leg_length_nm": 3,
+                "turn_direction": "right",
+                "hold_altitude_ft": "4000",
+            },
+            "invalid_hold_altitude",
+        ),
+    ]
+    for action, reason in cases:
+        valid, invalid = validate_actions(world, [action])
+        assert not valid
+        assert invalid and invalid[0]["reason"] == reason
+
+
 def test_takeoff_rejected_if_arrival_too_close():
     world = load_world(resolve_scenario_path("scenarios/departure_between_arrivals_001.json"))
     world.aircraft["ARR1"].x_nm = 4.0

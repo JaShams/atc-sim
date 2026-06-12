@@ -22,6 +22,50 @@ ALLOWED_EVENT_TYPES = {"wind_change", "emergency_declare", "low_fuel_emergency",
 REQUIRED_TOP_LEVEL = {"airport", "aircraft"}
 REQUIRED_AIRCRAFT = {"callsign", "role", "x_nm", "y_nm", "altitude_ft", "speed_kt", "heading_deg", "status"}
 REQUIRED_AIRPORT = {"runway_id", "active_runway"}
+OPTIONAL_AIRCRAFT = {
+    "wake_category",
+    "aircraft_type",
+    "vertical_rate_fpm",
+    "target_runway",
+    "clearance",
+    "target_altitude_ft",
+    "target_heading_deg",
+    "target_speed_kt",
+    "takeoff_roll_until_sec",
+    "emergency",
+    "ready_time_sec",
+    "takeoff_time_sec",
+    "landing_time_sec",
+    "ideal_takeoff_time_sec",
+    "ideal_landing_time_sec",
+    "emergency_subtype",
+    "emergency_deadline_sec",
+    "emergency_remaining_endurance_sec",
+    "emergency_terminal_failure",
+    "emergency_require_return_to_land",
+    "max_climb_fpm",
+    "max_descent_fpm",
+    "max_speed_kt",
+    "min_speed_kt",
+    "max_turn_rate_deg_per_sec",
+    "route_id",
+    "procedure_type",
+    "waypoints",
+    "current_leg_index",
+    "current_leg_completed",
+    "managed_route_active",
+    "manual_override_until_sec",
+    "hold_fix_id",
+    "hold_fix_x_nm",
+    "hold_fix_y_nm",
+    "hold_leg_length_nm",
+    "hold_turn_direction",
+    "hold_altitude_ft",
+    "hold_phase",
+    "hold_leg_progress_nm",
+    "hold_turn_remaining_deg",
+}
+ALLOWED_AIRCRAFT_FIELDS = REQUIRED_AIRCRAFT | OPTIONAL_AIRCRAFT
 NUMERIC_RULES = {
     "min_horizontal_nm",
     "min_vertical_ft",
@@ -277,6 +321,9 @@ def _validate_aircraft(aircraft: Any, errors: list[str]) -> set[str]:
             errors.append(f"{label} must be an object")
             continue
         _require_keys(ac, REQUIRED_AIRCRAFT, label, errors)
+        unknown_fields = sorted(set(ac) - ALLOWED_AIRCRAFT_FIELDS)
+        for field in unknown_fields:
+            errors.append(f"{label} has unknown field '{field}'")
         callsign = ac.get("callsign")
         if not isinstance(callsign, str) or not callsign.strip():
             errors.append(f"{label}.callsign must be a non-empty string")
@@ -387,6 +434,24 @@ def _validate_rules(rules: Any, errors: list[str]) -> None:
                     continue
                 _validate_id(zone.get("id"), label, errors)
                 _validate_point_list(zone.get("vertices"), f"{label}.vertices", 3, errors)
+    if "pilot_readback_delay_sec" in rules:
+        delay = rules["pilot_readback_delay_sec"]
+        if not isinstance(delay, Mapping):
+            errors.append("rules.pilot_readback_delay_sec must be an object")
+        else:
+            for field in ("min", "max"):
+                if field in delay and (not isinstance(delay[field], int) or isinstance(delay[field], bool) or delay[field] < 0):
+                    errors.append(f"rules.pilot_readback_delay_sec.{field} must be a non-negative integer")
+            min_delay = delay.get("min")
+            max_delay = delay.get("max")
+            if (
+                isinstance(min_delay, int)
+                and not isinstance(min_delay, bool)
+                and isinstance(max_delay, int)
+                and not isinstance(max_delay, bool)
+                and min_delay > max_delay
+            ):
+                errors.append("rules.pilot_readback_delay_sec.min must be <= max")
 
 
 def _validate_scoring(scoring: Any, errors: list[str]) -> None:
@@ -424,10 +489,14 @@ def _validate_events(events: Any, callsigns: set[str], errors: list[str]) -> Non
         if etype == "low_fuel_emergency":
             if event.get("aircraft") not in callsigns:
                 errors.append(f"{label}.aircraft must reference a known callsign")
-            if "deadline_sec" in event and (not isinstance(event.get("deadline_sec"), int) or event.get("deadline_sec") < 0):
+            deadline_sec = event.get("deadline_sec")
+            if "deadline_sec" in event and (not isinstance(deadline_sec, int) or isinstance(deadline_sec, bool) or deadline_sec < 0):
                 errors.append(f"{label}.deadline_sec must be a non-negative integer when present")
+            remaining_endurance_sec = event.get("remaining_endurance_sec")
             if "remaining_endurance_sec" in event and (
-                not isinstance(event.get("remaining_endurance_sec"), int) or event.get("remaining_endurance_sec") < 0
+                not isinstance(remaining_endurance_sec, int)
+                or isinstance(remaining_endurance_sec, bool)
+                or remaining_endurance_sec < 0
             ):
                 errors.append(f"{label}.remaining_endurance_sec must be a non-negative integer when present")
             if "deadline_sec" not in event and "remaining_endurance_sec" not in event:

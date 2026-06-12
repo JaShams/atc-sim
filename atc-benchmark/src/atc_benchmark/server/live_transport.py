@@ -76,6 +76,8 @@ class LiveTransportServer:
 
 CommandHandler = Callable[[dict[str, Any]], dict[str, Any] | Awaitable[dict[str, Any]]]
 
+COMMAND_ENVELOPE_TYPES = {"command", "pause", "resume", "reset", "end_session", "list_levels", "start_level"}
+
 
 def create_live_asgi_app(live_server: LiveTransportServer, *, on_command: CommandHandler | None = None):
     """Create a minimal ASGI app that serves ws://.../live.
@@ -141,14 +143,27 @@ def create_live_asgi_app(live_server: LiveTransportServer, *, on_command: Comman
                 if not isinstance(payload, dict):
                     await safe_send_json({"type": "command_ack", "ok": False, "status": "nack", "reason": "malformed_envelope"})
                     continue
-                if payload.get("type") == "subscribe_tick_stream" and queue is None:
-                    queue = await live_server.subscribe_tick_stream()
-                    forward_task = asyncio.create_task(forward_ticks(queue))
+                envelope_type = payload.get("type")
+                if envelope_type == "subscribe_tick_stream":
+                    if queue is None:
+                        queue = await live_server.subscribe_tick_stream()
+                        forward_task = asyncio.create_task(forward_ticks(queue))
                     continue
-                if payload.get("type") in {"command", "pause", "resume", "reset", "end_session", "list_levels", "start_level"} and on_command is not None:
+                if envelope_type in COMMAND_ENVELOPE_TYPES and on_command is not None:
                     result = on_command(payload)
                     response = await result if inspect.isawaitable(result) else result
                     await safe_send_json(response)
+                    continue
+                if isinstance(envelope_type, str):
+                    await safe_send_json(
+                        {
+                            "type": "command_ack",
+                            "ok": False,
+                            "status": "nack",
+                            "reason": "unsupported_envelope_type",
+                            "details": {"envelope_type": envelope_type},
+                        }
+                    )
         finally:
             if forward_task is not None:
                 forward_task.cancel()

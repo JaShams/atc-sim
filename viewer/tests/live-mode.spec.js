@@ -59,6 +59,51 @@ function startLiveServer() {
   return { child, ready };
 }
 
+test.describe('live websocket error handling', () => {
+  test('surfaces malformed websocket messages in status and log', async ({ page }) => {
+    await page.addInitScript(() => {
+      class FakeWebSocket {
+        static CONNECTING = 0;
+        static OPEN = 1;
+        static CLOSED = 3;
+
+        constructor(url) {
+          this.url = url;
+          this.readyState = FakeWebSocket.CONNECTING;
+          setTimeout(() => {
+            this.readyState = FakeWebSocket.OPEN;
+            this.onopen?.({});
+            setTimeout(() => {
+              this.onmessage?.({ data: '{"type":' });
+            }, 0);
+          }, 0);
+        }
+
+        send() {}
+
+        close() {
+          this.readyState = FakeWebSocket.CLOSED;
+          this.onclose?.({});
+        }
+      }
+
+      window.WebSocket = FakeWebSocket;
+    });
+
+    await page.goto('/index.html');
+    await page.evaluate(() => {
+      window.atcLiveEndpoint = 'ws://127.0.0.1:18080/live';
+    });
+
+    await page.getByRole('switch', { name: 'Live mode' }).check();
+    await page.getByRole('button', { name: 'Start' }).click();
+
+    await expect(page.getByRole('status').first()).toContainText('Malformed live message');
+    await page.getByRole('tab', { name: 'Log' }).click();
+    await expect(page.locator('.live-event-log')).toContainText('Malformed live message');
+  });
+});
+
 test.describe('live mode viewer controls', () => {
   let liveServer;
 

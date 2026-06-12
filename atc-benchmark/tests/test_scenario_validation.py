@@ -84,7 +84,10 @@ def test_valid_airport_layout_passes():
         (lambda p: p["aircraft"][0].update({"status": "teleporting"}), "status"),
         (lambda p: p["aircraft"][0].pop("callsign"), "callsign"),
         (lambda p: p["aircraft"][0].update({"heading_deg": 999}), "heading_deg"),
+        (lambda p: p["aircraft"][0].update({"extra_field": "unexpected"}), "unknown field"),
         (lambda p: p["airport"]["departure_queue"].append("MISSING"), "departure_queue"),
+        (lambda p: p.setdefault("rules", {}).update({"pilot_readback_delay_sec": [1]}), "pilot_readback_delay_sec"),
+        (lambda p: p.setdefault("rules", {}).update({"pilot_readback_delay_sec": {"min": 5, "max": 1}}), "min must be <= max"),
         (lambda p: p.setdefault("events", []).append({"time_sec": 5, "type": "emergency_declare", "aircraft": "MISSING"}), "events"),
     ],
 )
@@ -96,9 +99,17 @@ def test_invalid_scenario_document_reports_errors(mutate, message):
     assert message in str(exc.value)
 
 
-def test_load_world_validates_before_construction(tmp_path):
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda p: p["airport"].update({"active_runway": "99"}),
+        lambda p: p["aircraft"][0].update({"unexpected_field": "boom"}),
+        lambda p: p.setdefault("rules", {}).update({"pilot_readback_delay_sec": "soon"}),
+    ],
+)
+def test_load_world_validates_before_construction(tmp_path, mutate):
     payload = _valid_payload()
-    payload["airport"]["active_runway"] = "99"
+    mutate(payload)
     scenario = tmp_path / "bad.json"
     scenario.write_text(json.dumps(payload))
     with pytest.raises(ScenarioValidationError):

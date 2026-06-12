@@ -155,7 +155,7 @@ class WorldState:
     events: list[dict] = field(default_factory=list)
 
     def snapshot(self) -> dict[str, Any]:
-        airport = {
+        airport: dict[str, Any] = {
             "runway_id": self.airport.runway_id,
             "active_runway": self.airport.active_runway,
             "runway_occupied_by": self.airport.runway_occupied_by,
