@@ -82,6 +82,9 @@ NUMERIC_RULES = {
     "climb_out_altitude_ft",
     "climb_out_speed_kt",
     "airspace_exit_distance_nm",
+    "approach_glideslope_ft_per_nm",
+    "approach_max_intercept_above_glideslope_ft",
+    "handoff_min_distance_nm",
 }
 
 

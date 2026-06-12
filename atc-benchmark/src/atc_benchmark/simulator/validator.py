@@ -35,9 +35,10 @@ def _closest_inbound_arrival_final_distance(world: WorldState) -> float | None:
     return min(dists) if dists else None
 
 
-def _is_aligned_for_active_runway(world: WorldState, aircraft) -> bool:
+def _alignment_along_final_nm(world: WorldState, aircraft) -> float | None:
+    """Distance to run on final when the aircraft is established, else None."""
     if aircraft.target_runway is not None and aircraft.target_runway != world.airport.active_runway:
-        return False
+        return None
     for final_heading in (_runway_heading_deg(world.airport.active_runway), (_runway_heading_deg(world.airport.active_runway) + 180) % 360):
         heading_delta = _angle_delta_deg(aircraft.heading_deg, final_heading)
         rw_rad = radians(final_heading)
@@ -45,8 +46,20 @@ def _is_aligned_for_active_runway(world: WorldState, aircraft) -> bool:
         along_final_nm = -(aircraft.x_nm * ux + aircraft.y_nm * uy)
         cross_track_nm = abs(aircraft.x_nm * uy - aircraft.y_nm * ux)
         if heading_delta <= 35 and 0 <= along_final_nm <= 15 and cross_track_nm <= 3:
-            return True
-    return False
+            return along_final_nm
+    return None
+
+
+def _is_aligned_for_active_runway(world: WorldState, aircraft) -> bool:
+    return _alignment_along_final_nm(world, aircraft) is not None
+
+
+def _is_too_high_for_approach(world: WorldState, aircraft, along_final_nm: float) -> bool:
+    ceiling_ft = (
+        along_final_nm * world.rules.approach_glideslope_ft_per_nm
+        + world.rules.approach_max_intercept_above_glideslope_ft
+    )
+    return aircraft.altitude_ft > ceiling_ft
 
 
 def validate_actions(world: WorldState, actions: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -80,7 +93,9 @@ def validate_actions(world: WorldState, actions: list[dict]) -> tuple[list[dict]
             assert isinstance(cs, str)
             callsign = cs
             ac = world.aircraft[callsign]
-            if atype == "assign_heading":
+            if ac.handed_off and atype != "no_op":
+                reason = "aircraft_handed_off"
+            elif atype == "assign_heading":
                 heading = action.get("heading")
                 if not _is_number(heading) or not (0 <= heading <= 359):
                     reason = "invalid_heading"
@@ -98,8 +113,12 @@ def validate_actions(world: WorldState, actions: list[dict]) -> tuple[list[dict]
                 reason = "not_arrival"
             elif atype == "clear_to_land" and ac.status not in {"airborne", "on_final", "go_around"}:
                 reason = "not_on_final_or_arrival"
-            elif atype == "clear_to_land" and not _is_aligned_for_active_runway(world, ac):
-                reason = "not_aligned_with_active_runway"
+            elif atype == "clear_to_land":
+                along_final_nm = _alignment_along_final_nm(world, ac)
+                if along_final_nm is None:
+                    reason = "not_aligned_with_active_runway"
+                elif _is_too_high_for_approach(world, ac, along_final_nm):
+                    reason = "too_high_for_approach"
             elif atype == "clear_for_takeoff" and projected_runway_release_sec is not None and projected_runway_release_sec > projected_time:
                 reason = "runway_occupied"
             elif atype == "clear_for_takeoff" and cs not in world.airport.departure_queue:
@@ -123,6 +142,13 @@ def validate_actions(world: WorldState, actions: list[dict]) -> tuple[list[dict]
                     reason = "invalid_hold_altitude"
             elif atype == "exit_hold" and ac.hold_fix_id is None:
                 reason = "not_in_hold"
+            elif atype == "handoff_to_center":
+                if ac.role != "departure":
+                    reason = "not_departure"
+                elif ac.status != "airborne_departure":
+                    reason = "not_airborne_departure"
+                elif (ac.x_nm**2 + ac.y_nm**2) ** 0.5 < world.rules.handoff_min_distance_nm:
+                    reason = "too_close_for_handoff"
         if reason:
             invalid.append({"action": action, "reason": reason})
         else:

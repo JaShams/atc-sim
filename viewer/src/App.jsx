@@ -357,13 +357,14 @@ const COMMAND_CHEAT_SHEET = [
   ['ARR1 HDG 090', 'Turn to heading 090'],
   ['ARR1 ALT 4000', 'Climb or descend to 4,000 ft'],
   ['ARR1 SPD 180', 'Adjust speed to 180 kt'],
-  ['ARR1 LAND', 'Clear to land (must be aligned)'],
+  ['ARR1 LAND', 'Clear to land (must be aligned and low enough to capture the glidepath)'],
   ['DEP1 TAKEOFF', 'Clear for takeoff'],
   ['ARR1 GA', 'Go around'],
   ['ARR1 HOLD ALPHA', 'Hold at fix ALPHA (right turns)'],
   ['ARR1 HOLD ALPHA LEFT 6000', 'Hold at ALPHA, left turns, 6,000 ft'],
   ['ARR1 EXIT HOLD', 'Leave the holding pattern'],
-  ['ARR1 RESUME', 'Resume the published procedure']
+  ['ARR1 RESUME', 'Resume the published procedure'],
+  ['DEP1 HANDOFF', 'Hand the departure to center (15 nm or farther out)']
 ];
 
 function CommandCheatSheet() {

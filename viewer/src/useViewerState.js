@@ -44,7 +44,8 @@ const COMMAND_SCHEMA = {
   hold_position: { label: 'Hold position', unitHint: null },
   hold_at_waypoint: { label: 'Hold at waypoint', unitHint: null },
   exit_hold: { label: 'Exit hold', unitHint: null },
-  resume_procedure: { label: 'Resume procedure', unitHint: null }
+  resume_procedure: { label: 'Resume procedure', unitHint: null },
+  handoff_to_center: { label: 'Handoff to center', unitHint: null }
 };
 
 const VALIDATOR_REASON_MESSAGES = {
@@ -58,6 +59,11 @@ const VALIDATOR_REASON_MESSAGES = {
   not_arrival: 'Only arrivals can receive landing clearance.',
   not_on_final_or_arrival: 'Aircraft is not in a landing-eligible state.',
   not_aligned_with_active_runway: 'Aircraft is not aligned with the active runway.',
+  too_high_for_approach: 'Aircraft is too high to capture the glidepath from here.',
+  not_departure: 'Only departures can be handed to center.',
+  not_airborne_departure: 'Aircraft must be airborne and departing to hand off.',
+  too_close_for_handoff: 'Departure is still too close to the field for handoff.',
+  aircraft_handed_off: 'Aircraft has been handed to center and is off your frequency.',
   not_in_departure_queue: 'Aircraft is not in the departure queue.',
   arrival_too_close: 'Inbound arrival is too close for safe departure.',
   not_on_approach: 'Aircraft is not on approach for go-around.',
@@ -101,7 +107,12 @@ const labelMap = {
   successful_departure: 'Successful departure',
   emergency_handled: 'Emergency handled',
   emergency_unhandled: 'Emergency unhandled',
-  emergency_priority_compliance: 'Emergency priority compliance'
+  emergency_priority_compliance: 'Emergency priority compliance',
+  handoff_to_center: 'Handoff to center',
+  landing_clearance_available: 'Arrival is established for landing clearance',
+  handoff_due: 'Departure is ready for handoff to center',
+  handoff_completed: 'Handoff completed',
+  missed_handoff: 'Missed handoff'
 };
 
 // Helper utility functions
@@ -939,6 +950,7 @@ export default function useViewerState() {
     else if (/^(GA|GO AROUND|GOAROUND)$/.test(joined)) type = 'go_around';
     else if (/^(EXIT HOLD|CANCEL HOLD|LEAVE HOLD)$/.test(joined)) type = 'exit_hold';
     else if (/^(RESUME|RESUME PROCEDURE|PROCEED|OWN NAV)$/.test(joined)) type = 'resume_procedure';
+    else if (/^(HANDOFF|HAND OFF|CONTACT CENTER|CENTER)$/.test(joined)) type = 'handoff_to_center';
     else if (/^(HOLD SHORT|SHORT)$/.test(joined)) type = 'hold_short';
     else if (/^(HOLD|HOLD POS|HOLD POSITION|POSITION)$/.test(joined)) type = 'hold_position';
     else if (/^HOLD(\s+AT)?\s+\S+/.test(joined)) type = 'hold_at_waypoint';

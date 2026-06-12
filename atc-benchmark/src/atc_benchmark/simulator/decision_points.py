@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from math import hypot
+
 from .conflict_detection import detect_conflicts, predict_conflicts
 from .models import WorldState
+from .validator import _alignment_along_final_nm, _is_too_high_for_approach
 
 
 def _runway_heading_deg(runway_id: str) -> float:
@@ -28,7 +31,8 @@ def detect_decision_points(
 
     runway_heading = _runway_heading_deg(world.airport.active_runway)
     wind_alignment_delta = _angle_delta_deg(world.weather.wind_dir_deg, runway_heading)
-    if wind_alignment_delta >= 45:
+    # Calm wind favors no runway; direction is meaningless below ~5 kt.
+    if world.weather.wind_speed_kt >= 5 and wind_alignment_delta >= 45:
         impacted = [ac.callsign for ac in world.aircraft.values() if ac.status in {"waiting_departure", "on_final", "airborne"}]
         out.append({
             "type": "wind_runway_mismatch",
@@ -50,4 +54,20 @@ def detect_decision_points(
             out.append({"type": "runway_occupied_on_final", "aircraft": [ac.callsign]})
         if ac.emergency and ac.status in {"airborne", "on_final"}:
             out.append({"type": "emergency", "aircraft": [ac.callsign]})
+        if (
+            ac.role == "arrival"
+            and ac.status in {"airborne", "on_final"}
+            and ac.clearance != "cleared_to_land"
+            and world.airport.runway_occupied_by is None
+        ):
+            along_final_nm = _alignment_along_final_nm(world, ac)
+            if along_final_nm is not None and not _is_too_high_for_approach(world, ac, along_final_nm):
+                out.append({"type": "landing_clearance_available", "aircraft": [ac.callsign]})
+        if (
+            ac.role == "departure"
+            and ac.status == "airborne_departure"
+            and not ac.handed_off
+            and hypot(ac.x_nm, ac.y_nm) >= world.rules.handoff_min_distance_nm
+        ):
+            out.append({"type": "handoff_due", "aircraft": [ac.callsign]})
     return out

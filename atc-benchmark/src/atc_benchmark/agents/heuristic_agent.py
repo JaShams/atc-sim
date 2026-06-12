@@ -11,7 +11,13 @@ class HeuristicAgent:
         "predicted_conflict": 3,
         "runway_occupied_on_final": 4,
         "departure_ready": 5,
+        "landing_clearance_available": 6,
+        "handoff_due": 7,
     }
+
+    # Mirrors validator approach-geometry defaults so issued clearances pass.
+    _GLIDESLOPE_FT_PER_NM = 320.0
+    _MAX_INTERCEPT_ABOVE_GLIDESLOPE_FT = 1200.0
 
     def _priority_key(self, decision_point: dict) -> tuple[int, str, str]:
         dp_type = decision_point.get("type", "")
@@ -44,7 +50,9 @@ class HeuristicAgent:
             along_final_nm = -(ac.get("x_nm", 0) * ux + ac.get("y_nm", 0) * uy)
             cross_track_nm = abs(ac.get("x_nm", 0) * uy - ac.get("y_nm", 0) * ux)
             if self._angle_delta(ac.get("heading_deg", 0), final_heading) <= 35 and 0 <= along_final_nm <= 15 and cross_track_nm <= 3:
-                return True
+                ceiling_ft = along_final_nm * self._GLIDESLOPE_FT_PER_NM + self._MAX_INTERCEPT_ABOVE_GLIDESLOPE_FT
+                if ac.get("altitude_ft", 0) <= ceiling_ft:
+                    return True
         return False
 
     def _conflict_heading(self, callsign: str, dp: dict, snapshot: dict) -> int:
@@ -58,6 +66,13 @@ class HeuristicAgent:
         away = (degrees(atan2(dx, dy)) + 360) % 360
         return int(round(away / 5) * 5) % 360
 
+    def _conflict_aircraft(self, dp: dict, snapshot: dict) -> str:
+        # Protect the arrival flow: in a mixed conflict, vector the departure.
+        for callsign in dp.get("aircraft", []):
+            if snapshot["aircraft"].get(callsign, {}).get("status") == "airborne_departure":
+                return callsign
+        return dp["aircraft"][0]
+
     def _action_for(self, dp: dict, runway_occupied: bool, wind_mismatch: bool, snapshot: dict) -> dict | None:
         aircraft = dp["aircraft"][0]
         dp_type = dp.get("type")
@@ -67,14 +82,17 @@ class HeuristicAgent:
             return {"aircraft": aircraft, "type": "clear_to_land"}
         if dp_type == "emergency":
             return {"aircraft": aircraft, "type": "assign_heading", "heading": int(self._runway_heading(snapshot))}
-        if dp_type == "active_conflict":
-            return {"aircraft": aircraft, "type": "assign_heading", "heading": self._conflict_heading(aircraft, dp, snapshot)}
-        if dp_type == "predicted_conflict":
+        if dp_type in {"active_conflict", "predicted_conflict"}:
+            aircraft = self._conflict_aircraft(dp, snapshot)
             return {"aircraft": aircraft, "type": "assign_heading", "heading": self._conflict_heading(aircraft, dp, snapshot)}
         if dp_type == "runway_occupied_on_final":
             return {"aircraft": aircraft, "type": "go_around"}
         if dp_type == "departure_ready" and not runway_occupied and not wind_mismatch:
             return {"aircraft": aircraft, "type": "clear_for_takeoff"}
+        if dp_type == "landing_clearance_available" and not runway_occupied and not wind_mismatch and self._is_clearable_arrival(aircraft, snapshot):
+            return {"aircraft": aircraft, "type": "clear_to_land"}
+        if dp_type == "handoff_due":
+            return {"aircraft": aircraft, "type": "handoff_to_center"}
         return None
 
     def act(self, observation: dict) -> dict:

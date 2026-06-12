@@ -141,4 +141,8 @@ def test_legacy_instant_liftoff_without_roll_rules():
     apply_actions(world, [{"aircraft": "D1", "type": "clear_for_takeoff"}])
     _tick(world)
     assert dep.status == "airborne_departure"
-    assert dep.vertical_rate_fpm == 0  # legacy: no implied climb-out
+    # Liftoff is instant (no roll), but the climb-out still starts so the
+    # departure actually flies away instead of squatting on the field.
+    assert dep.vertical_rate_fpm == 2000
+    assert dep.target_altitude_ft == world.rules.climb_out_altitude_ft
+    assert dep.speed_kt >= world.rules.takeoff_rotation_speed_kt
