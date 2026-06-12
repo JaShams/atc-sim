@@ -105,7 +105,7 @@ Exact transition semantics (per `conflict_pair_id`):
 
 ### Message schema
 
-The viewer (`viewer/viewer.js` `handleLiveEnvelope`) accepts either:
+The viewer (`viewer/src/useViewerState.js` `handleLiveEnvelope`) accepts either:
 
 - an envelope with `tick.state`, or
 - a raw tick object with `state`.

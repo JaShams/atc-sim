@@ -41,7 +41,10 @@ const COMMAND_SCHEMA = {
   clear_for_takeoff: { label: 'Clear for takeoff', unitHint: null },
   go_around: { label: 'Go around', unitHint: null },
   hold_short: { label: 'Hold short', unitHint: null },
-  hold_position: { label: 'Hold position', unitHint: null }
+  hold_position: { label: 'Hold position', unitHint: null },
+  hold_at_waypoint: { label: 'Hold at waypoint', unitHint: null },
+  exit_hold: { label: 'Exit hold', unitHint: null },
+  resume_procedure: { label: 'Resume procedure', unitHint: null }
 };
 
 const VALIDATOR_REASON_MESSAGES = {
@@ -57,7 +60,15 @@ const VALIDATOR_REASON_MESSAGES = {
   not_aligned_with_active_runway: 'Aircraft is not aligned with the active runway.',
   not_in_departure_queue: 'Aircraft is not in the departure queue.',
   arrival_too_close: 'Inbound arrival is too close for safe departure.',
-  not_on_approach: 'Aircraft is not on approach for go-around.'
+  not_on_approach: 'Aircraft is not on approach for go-around.',
+  invalid_waypoint: 'Provide a fix name for the hold.',
+  unknown_waypoint: 'No such fix on this airport chart.',
+  invalid_turn_direction: 'Hold turn direction must be left or right.',
+  invalid_leg_length: 'Hold leg length must be positive.',
+  invalid_hold_altitude: 'Hold altitude is below the minimum.',
+  not_in_hold: 'Aircraft is not holding.',
+  no_active_level: 'Start a level before sending commands.',
+  malformed_json: 'The server could not parse the command.'
 };
 
 const labelMap = {
@@ -572,6 +583,14 @@ export default function useViewerState() {
     setSelectedCallsign(callsign || null);
   }, []);
 
+  const prefillCommand = useCallback((callsign) => {
+    setSelectedCallsign(callsign || null);
+    if (callsign) {
+      setCommandText(`${callsign} `);
+      setCommandFeedback({ status: null, message: '' });
+    }
+  }, []);
+
   // WebSocket Live transport integration
   const resolveLiveEndpoint = () => {
     return window.atcLiveEndpoint || DEFAULT_LIVE_ENDPOINT;
@@ -916,13 +935,45 @@ export default function useViewerState() {
     else if (/^(LAND|CLEAR LAND|CLEARED LAND|CLEAR TO LAND)$/.test(joined)) type = 'clear_to_land';
     else if (/^(TAKEOFF|TAKE OFF|CLEAR TAKEOFF|CLEAR FOR TAKEOFF)$/.test(joined)) type = 'clear_for_takeoff';
     else if (/^(GA|GO AROUND|GOAROUND)$/.test(joined)) type = 'go_around';
+    else if (/^(EXIT HOLD|CANCEL HOLD|LEAVE HOLD)$/.test(joined)) type = 'exit_hold';
+    else if (/^(RESUME|RESUME PROCEDURE|PROCEED|OWN NAV)$/.test(joined)) type = 'resume_procedure';
     else if (/^(HOLD SHORT|SHORT)$/.test(joined)) type = 'hold_short';
     else if (/^(HOLD|HOLD POS|HOLD POSITION|POSITION)$/.test(joined)) type = 'hold_position';
+    else if (/^HOLD(\s+AT)?\s+\S+/.test(joined)) type = 'hold_at_waypoint';
     if (!type) return { ok: false, reason: 'Unsupported command action.' };
+
+    if (type === 'hold_at_waypoint') {
+      const holdTokens = actionTokens.slice(1);
+      if (holdTokens[0] === 'AT') holdTokens.shift();
+      const fix = holdTokens.shift();
+      if (!fix) return { ok: false, reason: 'Provide a fix name, e.g. ARR1 HOLD ALPHA.' };
+      let turnDirection = 'right';
+      let holdAltitude = null;
+      holdTokens.forEach((token) => {
+        if (token === 'LEFT') turnDirection = 'left';
+        else if (token === 'RIGHT') turnDirection = 'right';
+        else if (/^\d+(\.\d+)?$/.test(token)) holdAltitude = Number(token);
+      });
+      const currentAircraft = currentEvent.state?.aircraft?.[aircraft];
+      const fallbackAltitude = currentAircraft
+        ? Math.max(1000, Math.round(Number(currentAircraft.altitude_ft) / 100) * 100)
+        : 5000;
+      return {
+        ok: true,
+        command: {
+          aircraft,
+          type,
+          waypoint: fix,
+          turn_direction: turnDirection,
+          leg_length_nm: 5,
+          hold_altitude_ft: holdAltitude ?? fallbackAltitude
+        }
+      };
+    }
 
     const schema = COMMAND_SCHEMA[type];
     const command = { aircraft, type };
-    if (schema.field) {
+    if (schema?.field) {
       if (!Number.isFinite(value)) return { ok: false, reason: `Provide ${schema.unitHint}.` };
       if (value < schema.min || value > schema.max) return { ok: false, reason: `${schema.label} must be ${schema.unitHint}.` };
       command[schema.field] = value;
@@ -1058,6 +1109,7 @@ export default function useViewerState() {
     handleResetView,
     handleModeChange,
     selectAircraftForCommand,
+    prefillCommand,
     connectLiveTransport,
     disconnectLiveTransport,
     sendLiveControl,

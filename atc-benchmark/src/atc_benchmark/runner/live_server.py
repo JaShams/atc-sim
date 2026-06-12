@@ -39,6 +39,7 @@ def list_levels(scenarios_root: Path | None = None) -> list[dict[str, Any]]:
             {
                 "id": scenario_path.name,
                 "name": _prettify_stem(scenario_path.stem),
+                "description": metadata.get("description"),
                 "difficulty_tier": metadata.get("difficulty_tier"),
                 "tags": metadata.get("tags", []),
                 "intended_stressors": metadata.get("intended_stressors", []),

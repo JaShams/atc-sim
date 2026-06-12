@@ -94,7 +94,14 @@ test.describe('live mode viewer controls', () => {
     await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Reset' })).toHaveCount(0);
     await expect(page.getByLabel('Time')).toHaveCount(0);
-    await expect(page.locator('.flight-strip')).toHaveCount(0);
+
+    // Flight strips are the default sidebar tab; clicking one prefills the command line.
+    await expect(page.locator('.flight-strip').first()).toBeVisible();
+    await page.locator('.flight-strip', { hasText: 'ARR1' }).first().click();
+    await expect(page.getByLabel('Command text')).toHaveValue('ARR1 ');
+
+    // Running score HUD appears once ticks carry a score.
+    await expect(page.locator('.score-hud')).toBeVisible();
 
     await page.getByRole('button', { name: 'Set scope to 80 nautical miles' }).click();
     await page.getByRole('button', { name: 'Set scope to 40 nautical miles' }).click();

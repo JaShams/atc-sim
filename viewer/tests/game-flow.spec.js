@@ -85,8 +85,9 @@ test.describe('game flow: lobby, debrief, replay restore', () => {
     // Lobby: level catalog visible with playable cards.
     const lobby = page.getByLabel('Level select');
     await expect(lobby).toBeVisible();
-    await expect(page.locator('.level-card')).toHaveCount(15);
+    await expect(page.locator('.level-card')).toHaveCount(16);
     await expect(page.locator('.level-card').first()).toContainText('Not played yet');
+    await expect(page.locator('.level-card', { hasText: 'Tutorial First Contact' })).toContainText('Learn the controls');
 
     // Start a level: lobby hides, ticks flow.
     await page.getByRole('button', { name: /Crossing Conflict 001/ }).click();

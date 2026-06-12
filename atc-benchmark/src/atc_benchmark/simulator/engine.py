@@ -154,20 +154,44 @@ def _named_fix_lookup(world: WorldState) -> dict[str, tuple[float, float]]:
     return fixes
 
 
+def _effective_turn_rate(world: WorldState, ac: Aircraft) -> float | None:
+    if ac.max_turn_rate_deg_per_sec is not None:
+        return ac.max_turn_rate_deg_per_sec
+    return world.rules.default_turn_rate_deg_per_sec
+
+
 def _turn_toward_target_heading(world: WorldState, ac: Aircraft) -> None:
     if ac.target_heading_deg is None or ac.hold_fix_id is not None:
         return
-    if ac.max_turn_rate_deg_per_sec is None:
+    rate = _effective_turn_rate(world, ac)
+    if rate is None:
         ac.heading_deg = ac.target_heading_deg % 360
         ac.target_heading_deg = None
         return
-    max_delta = ac.max_turn_rate_deg_per_sec * world.tick_sec
+    max_delta = rate * world.tick_sec
     delta = ((ac.target_heading_deg - ac.heading_deg + 180) % 360) - 180
     if abs(delta) <= max_delta:
         ac.heading_deg = ac.target_heading_deg % 360
         ac.target_heading_deg = None
     else:
         ac.heading_deg = (ac.heading_deg + math.copysign(max_delta, delta)) % 360
+
+
+def _adjust_speed_toward_target(world: WorldState, ac: Aircraft) -> None:
+    if ac.target_speed_kt is None:
+        return
+    rate = world.rules.speed_change_rate_kt_per_sec
+    if rate is None:
+        ac.speed_kt = ac.target_speed_kt
+        ac.target_speed_kt = None
+        return
+    max_delta = rate * world.tick_sec
+    delta = ac.target_speed_kt - ac.speed_kt
+    if abs(delta) <= max_delta:
+        ac.speed_kt = ac.target_speed_kt
+        ac.target_speed_kt = None
+    else:
+        ac.speed_kt += math.copysign(max_delta, delta)
 
 
 def advance(world: WorldState) -> list[dict]:
@@ -177,6 +201,7 @@ def advance(world: WorldState) -> list[dict]:
         _update_managed_route(world, ac)
         if ac.status in {"airborne", "on_final", "go_around", "rolling", "airborne_departure", "holding"}:
             _turn_toward_target_heading(world, ac)
+            _adjust_speed_toward_target(world, ac)
             rad = math.radians(ac.heading_deg)
             wind_to_deg = (world.weather.wind_dir_deg + 180) % 360
             wind_rad = math.radians(wind_to_deg)
@@ -244,9 +269,27 @@ def advance(world: WorldState) -> list[dict]:
                 world.airport.runway_phase = "vacating"
                 world.airport.runway_occupied_until_sec = world.time_sec + world.tick_sec + LANDING_RUNWAY_OCCUPANCY_SEC
             if ac.status == "rolling":
-                ac.status = "airborne_departure"
-                ac.takeoff_time_sec = world.time_sec + world.tick_sec
-        if ac.status == "airborne_departure" and (abs(ac.x_nm) > 30 or abs(ac.y_nm) > 30):
+                still_rolling = (
+                    ac.takeoff_roll_until_sec is not None
+                    and world.time_sec + world.tick_sec < ac.takeoff_roll_until_sec
+                )
+                if still_rolling:
+                    ac.speed_kt = min(
+                        world.rules.takeoff_rotation_speed_kt,
+                        ac.speed_kt + world.rules.takeoff_acceleration_kt_per_sec * world.tick_sec,
+                    )
+                else:
+                    if ac.takeoff_roll_until_sec is not None:
+                        # Rotate: lift off at rotation speed and start the climb-out.
+                        ac.takeoff_roll_until_sec = None
+                        ac.speed_kt = max(ac.speed_kt, world.rules.takeoff_rotation_speed_kt)
+                        ac.target_speed_kt = world.rules.climb_out_speed_kt
+                        ac.vertical_rate_fpm = 2000
+                        ac.target_altitude_ft = world.rules.climb_out_altitude_ft
+                    ac.status = "airborne_departure"
+                    ac.takeoff_time_sec = world.time_sec + world.tick_sec
+        exit_nm = world.rules.airspace_exit_distance_nm
+        if ac.status == "airborne_departure" and (abs(ac.x_nm) > exit_nm or abs(ac.y_nm) > exit_nm):
             ac.status = "exited_airspace"
     return events
 
@@ -330,7 +373,7 @@ def apply_actions(world: WorldState, actions: list[dict]) -> dict:
         ac = world.aircraft[action["aircraft"]]
         if t == "assign_heading":
             desired_heading = action["heading"] % 360
-            if ac.max_turn_rate_deg_per_sec is None:
+            if _effective_turn_rate(world, ac) is None:
                 ac.heading_deg = desired_heading
                 ac.target_heading_deg = None
             else:
@@ -356,7 +399,12 @@ def apply_actions(world: WorldState, actions: list[dict]) -> dict:
                 speed = min(speed, ac.max_speed_kt)
             if ac.min_speed_kt is not None:
                 speed = max(speed, ac.min_speed_kt)
-            ac.speed_kt = speed
+            if world.rules.speed_change_rate_kt_per_sec is None:
+                ac.speed_kt = speed
+                ac.target_speed_kt = None
+            else:
+                # Speed changes ramp progressively each tick in advance().
+                ac.target_speed_kt = speed
             ac.managed_route_active = False
             ac.manual_override_until_sec = world.time_sec + 120
         elif t == "clear_to_land":
@@ -367,9 +415,14 @@ def apply_actions(world: WorldState, actions: list[dict]) -> dict:
             ac.status = "rolling"
             if ac.ready_time_sec is None:
                 ac.ready_time_sec = world.time_sec
+            roll_sec = world.rules.takeoff_roll_sec
+            if roll_sec > 0:
+                ac.takeoff_roll_until_sec = world.time_sec + roll_sec
+                ac.heading_deg = _runway_heading_deg(world.airport.active_runway) % 360
+                ac.target_heading_deg = None
             world.airport.runway_occupied_by = ac.callsign
             world.airport.runway_phase = "takeoff_roll"
-            world.airport.runway_occupied_until_sec = world.time_sec + TAKEOFF_RUNWAY_OCCUPANCY_SEC
+            world.airport.runway_occupied_until_sec = world.time_sec + max(TAKEOFF_RUNWAY_OCCUPANCY_SEC, roll_sec)
             if ac.callsign in world.airport.departure_queue:
                 world.airport.departure_queue.remove(ac.callsign)
         elif t == "go_around":
@@ -418,6 +471,7 @@ def apply_actions(world: WorldState, actions: list[dict]) -> dict:
             ac.managed_route_active = True
             ac.manual_override_until_sec = None
             ac.target_heading_deg = None
+            ac.target_speed_kt = None
     return {"go_around_count": go_arounds}
 
 
