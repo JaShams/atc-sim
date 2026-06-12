@@ -60,6 +60,12 @@
         1,
         10
       ]
-    }
+    },
+    "description": "An arrival's present heading takes it straight through a restricted zone. Vector around the airspace, then recover the approach.",
+    "star_thresholds": [
+      1.0,
+      55.0,
+      82.0
+    ]
   }
 }

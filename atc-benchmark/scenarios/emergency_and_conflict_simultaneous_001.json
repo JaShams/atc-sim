@@ -1,14 +1,57 @@
 {
   "tick_sec": 5,
-  "airport": {"runway_id": "18", "active_runway": "18", "runway_occupied_by": null, "departure_queue": ["DEP1"]},
-  "rules": {"lookahead_seconds": 90},
+  "airport": {
+    "runway_id": "18",
+    "active_runway": "18",
+    "runway_occupied_by": null,
+    "departure_queue": [
+      "DEP1"
+    ]
+  },
+  "rules": {
+    "lookahead_seconds": 90
+  },
   "events": [
-    {"time_sec": 0, "type": "emergency_declare", "aircraft": "ARR_EMG"}
+    {
+      "time_sec": 0,
+      "type": "emergency_declare",
+      "aircraft": "ARR_EMG"
+    }
   ],
   "aircraft": [
-    {"callsign": "ARR_EMG", "role": "arrival", "x_nm": -8.0, "y_nm": 0.0, "altitude_ft": 2600, "speed_kt": 210, "heading_deg": 90, "status": "airborne", "target_runway": "18"},
-    {"callsign": "ARR2", "role": "arrival", "x_nm": -7.0, "y_nm": 0.5, "altitude_ft": 2550, "speed_kt": 205, "heading_deg": 90, "status": "airborne", "target_runway": "18"},
-    {"callsign": "DEP1", "role": "departure", "x_nm": 0, "y_nm": 0, "altitude_ft": 0, "speed_kt": 0, "heading_deg": 180, "status": "waiting_departure", "target_runway": "18"}
+    {
+      "callsign": "ARR_EMG",
+      "role": "arrival",
+      "x_nm": -8.0,
+      "y_nm": 0.0,
+      "altitude_ft": 2600,
+      "speed_kt": 210,
+      "heading_deg": 90,
+      "status": "airborne",
+      "target_runway": "18"
+    },
+    {
+      "callsign": "ARR2",
+      "role": "arrival",
+      "x_nm": -7.0,
+      "y_nm": 0.5,
+      "altitude_ft": 2550,
+      "speed_kt": 205,
+      "heading_deg": 90,
+      "status": "airborne",
+      "target_runway": "18"
+    },
+    {
+      "callsign": "DEP1",
+      "role": "departure",
+      "x_nm": 0,
+      "y_nm": 0,
+      "altitude_ft": 0,
+      "speed_kt": 0,
+      "heading_deg": 180,
+      "status": "waiting_departure",
+      "target_runway": "18"
+    }
   ],
   "scenario_metadata": {
     "tags": [
@@ -33,6 +76,12 @@
         0,
         30
       ]
-    }
+    },
+    "description": "An emergency declaration lands on top of an active separation conflict. Resolve both at once: protect the emergency's runway access without trading away separation elsewhere.",
+    "star_thresholds": [
+      1.0,
+      70.0,
+      90.0
+    ]
   }
 }

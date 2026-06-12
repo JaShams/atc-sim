@@ -17,25 +17,60 @@
       "route_id": "STAR-TEST1",
       "procedure_type": "STAR",
       "waypoints": [
-        {"name": "STAR1", "x_nm": 8.0, "y_nm": 4.0, "max_altitude_ft": 9000, "speed_kt": 240},
-        {"name": "STAR2", "x_nm": 4.0, "y_nm": 2.0, "max_altitude_ft": 6000, "speed_kt": 210},
-        {"name": "FINAL", "x_nm": 1.0, "y_nm": 0.0, "max_altitude_ft": 3000, "speed_kt": 180}
+        {
+          "name": "STAR1",
+          "x_nm": 8.0,
+          "y_nm": 4.0,
+          "max_altitude_ft": 9000,
+          "speed_kt": 240
+        },
+        {
+          "name": "STAR2",
+          "x_nm": 4.0,
+          "y_nm": 2.0,
+          "max_altitude_ft": 6000,
+          "speed_kt": 210
+        },
+        {
+          "name": "FINAL",
+          "x_nm": 1.0,
+          "y_nm": 0.0,
+          "max_altitude_ft": 3000,
+          "speed_kt": 180
+        }
       ],
       "current_leg_index": 0,
       "current_leg_completed": false
     }
   ],
   "scenario_metadata": {
-    "tags": ["efficiency"],
+    "tags": [
+      "efficiency"
+    ],
     "difficulty_tier": "intro",
     "intended_stressors": [
       "STAR altitude constraints",
       "managed route tracking"
     ],
     "expected_baseline_ranges": {
-      "score": [0, 120],
-      "throughput_ops_per_hour": [0, 720],
-      "invalid_commands": [0, 20]
-    }
+      "score": [
+        0,
+        120
+      ],
+      "throughput_ops_per_hour": [
+        0,
+        720
+      ],
+      "invalid_commands": [
+        0,
+        20
+      ]
+    },
+    "description": "A single arrival is flying a STAR with altitude constraints. Keep it on the procedure and intervene only when the route alone is not enough.",
+    "star_thresholds": [
+      1.0,
+      55.0,
+      82.0
+    ]
   }
 }

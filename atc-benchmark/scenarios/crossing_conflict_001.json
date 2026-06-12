@@ -172,6 +172,12 @@
         10,
         80
       ]
-    }
+    },
+    "description": "Two arrivals converge on crossing tracks at nearly the same altitude while a departure waits at the hold-short line. Break the conflict early, then rebuild the landing sequence.",
+    "star_thresholds": [
+      1.0,
+      65.0,
+      88.0
+    ]
   }
 }

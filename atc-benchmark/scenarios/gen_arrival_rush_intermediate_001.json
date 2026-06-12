@@ -1,0 +1,213 @@
+{
+  "tick_sec": 5,
+  "airport": {
+    "runway_id": "15",
+    "active_runway": "15",
+    "runway_occupied_by": null,
+    "departure_queue": [
+      "UPS509"
+    ],
+    "layout": {
+      "runways": [
+        {
+          "id": "15",
+          "ends": [
+            {
+              "x_nm": -1.3,
+              "y_nm": 2.252
+            },
+            {
+              "x_nm": 1.3,
+              "y_nm": -2.252
+            }
+          ],
+          "width_nm": 0.08
+        }
+      ],
+      "taxiways": [
+        {
+          "id": "A",
+          "points": [
+            {
+              "x_nm": -1.203,
+              "y_nm": 1.384
+            },
+            {
+              "x_nm": -0.503,
+              "y_nm": 0.171
+            },
+            {
+              "x_nm": -0.087,
+              "y_nm": -0.05
+            },
+            {
+              "x_nm": 0.613,
+              "y_nm": -1.262
+            }
+          ],
+          "width_nm": 0.04
+        },
+        {
+          "id": "B",
+          "points": [
+            {
+              "x_nm": -0.087,
+              "y_nm": -0.05
+            },
+            {
+              "x_nm": -0.693,
+              "y_nm": -0.4
+            }
+          ],
+          "width_nm": 0.04
+        }
+      ],
+      "aprons": [
+        {
+          "id": "MAIN",
+          "polygon": [
+            {
+              "x_nm": -1.446,
+              "y_nm": 0.204
+            },
+            {
+              "x_nm": -0.546,
+              "y_nm": -1.354
+            },
+            {
+              "x_nm": -0.174,
+              "y_nm": -1.139
+            },
+            {
+              "x_nm": -1.074,
+              "y_nm": 0.419
+            }
+          ]
+        }
+      ],
+      "stands": [
+        {
+          "id": "S1",
+          "position": {
+            "x_nm": -1.089,
+            "y_nm": 0.006
+          }
+        },
+        {
+          "id": "S2",
+          "position": {
+            "x_nm": -0.814,
+            "y_nm": -0.47
+          }
+        },
+        {
+          "id": "S3",
+          "position": {
+            "x_nm": -0.539,
+            "y_nm": -0.946
+          }
+        }
+      ]
+    }
+  },
+  "weather": {
+    "wind_dir_deg": 164,
+    "wind_speed_kt": 11
+  },
+  "rules": {
+    "min_horizontal_nm": 3.0,
+    "min_vertical_ft": 1000.0,
+    "lookahead_seconds": 90
+  },
+  "aircraft": [
+    {
+      "callsign": "DAL939",
+      "role": "arrival",
+      "x_nm": -7.584,
+      "y_nm": -2.928,
+      "altitude_ft": 3075,
+      "speed_kt": 200,
+      "heading_deg": 69,
+      "status": "airborne",
+      "target_runway": "15",
+      "aircraft_type": "A321",
+      "wake_category": "medium"
+    },
+    {
+      "callsign": "JBU930",
+      "role": "arrival",
+      "x_nm": -11.469,
+      "y_nm": -5.407,
+      "altitude_ft": 4274,
+      "speed_kt": 205,
+      "heading_deg": 65,
+      "status": "airborne",
+      "target_runway": "15",
+      "aircraft_type": "B738",
+      "wake_category": "medium"
+    },
+    {
+      "callsign": "UPS137",
+      "role": "arrival",
+      "x_nm": -8.468,
+      "y_nm": -13.576,
+      "altitude_ft": 5337,
+      "speed_kt": 206,
+      "heading_deg": 32,
+      "status": "airborne",
+      "target_runway": "15",
+      "aircraft_type": "A359",
+      "wake_category": "heavy"
+    },
+    {
+      "callsign": "UPS509",
+      "role": "departure",
+      "x_nm": -0.242,
+      "y_nm": -0.14,
+      "altitude_ft": 0,
+      "speed_kt": 0,
+      "heading_deg": 150,
+      "status": "waiting_departure",
+      "target_runway": "15",
+      "aircraft_type": "A320",
+      "wake_category": "medium"
+    }
+  ],
+  "scenario_metadata": {
+    "description": "A steady inbound push: 3 arrival(s) converge on runway 15 while 1 departure(s) wait for a gap. Sequence the flow without losing separation.",
+    "tags": [
+      "efficiency",
+      "safety"
+    ],
+    "difficulty_tier": "intermediate",
+    "intended_stressors": [
+      "arrival sequencing under volume",
+      "departure gap management"
+    ],
+    "star_thresholds": [
+      1.0,
+      60.0,
+      85.0
+    ],
+    "expected_baseline_ranges": {
+      "score": [
+        0.0,
+        110.0
+      ],
+      "active_conflicts_count_total": [
+        0.0,
+        400.0
+      ],
+      "throughput_ops_per_hour": [
+        0.0,
+        80.0
+      ]
+    },
+    "generator": {
+      "name": "atc-seed",
+      "version": "1.0.0",
+      "template": "arrival_rush",
+      "seed": 43
+    }
+  }
+}

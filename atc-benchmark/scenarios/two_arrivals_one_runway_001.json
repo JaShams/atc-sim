@@ -56,6 +56,12 @@
         20,
         90
       ]
-    }
+    },
+    "description": "Two arrivals want the same runway at the same time. Sequence them cleanly: one lands, one follows, nobody goes around.",
+    "star_thresholds": [
+      1.0,
+      60.0,
+      85.0
+    ]
   }
 }

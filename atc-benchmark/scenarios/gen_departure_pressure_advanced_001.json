@@ -1,0 +1,213 @@
+{
+  "tick_sec": 5,
+  "airport": {
+    "runway_id": "17",
+    "active_runway": "17",
+    "runway_occupied_by": null,
+    "departure_queue": [
+      "FDX148"
+    ],
+    "layout": {
+      "runways": [
+        {
+          "id": "17",
+          "ends": [
+            {
+              "x_nm": -0.451,
+              "y_nm": 2.561
+            },
+            {
+              "x_nm": 0.451,
+              "y_nm": -2.561
+            }
+          ],
+          "width_nm": 0.08
+        }
+      ],
+      "taxiways": [
+        {
+          "id": "A",
+          "points": [
+            {
+              "x_nm": -0.657,
+              "y_nm": 1.712
+            },
+            {
+              "x_nm": -0.414,
+              "y_nm": 0.333
+            },
+            {
+              "x_nm": -0.098,
+              "y_nm": -0.017
+            },
+            {
+              "x_nm": 0.145,
+              "y_nm": -1.396
+            }
+          ],
+          "width_nm": 0.04
+        },
+        {
+          "id": "B",
+          "points": [
+            {
+              "x_nm": -0.098,
+              "y_nm": -0.017
+            },
+            {
+              "x_nm": -0.788,
+              "y_nm": -0.139
+            }
+          ],
+          "width_nm": 0.04
+        }
+      ],
+      "aprons": [
+        {
+          "id": "MAIN",
+          "polygon": [
+            {
+              "x_nm": -1.289,
+              "y_nm": 0.687
+            },
+            {
+              "x_nm": -0.976,
+              "y_nm": -1.086
+            },
+            {
+              "x_nm": -0.553,
+              "y_nm": -1.011
+            },
+            {
+              "x_nm": -0.865,
+              "y_nm": 0.761
+            }
+          ]
+        }
+      ],
+      "stands": [
+        {
+          "id": "S1",
+          "position": {
+            "x_nm": -1.021,
+            "y_nm": 0.378
+          }
+        },
+        {
+          "id": "S2",
+          "position": {
+            "x_nm": -0.926,
+            "y_nm": -0.163
+          }
+        },
+        {
+          "id": "S3",
+          "position": {
+            "x_nm": -0.83,
+            "y_nm": -0.705
+          }
+        }
+      ]
+    }
+  },
+  "weather": {
+    "wind_dir_deg": 173,
+    "wind_speed_kt": 6
+  },
+  "rules": {
+    "min_horizontal_nm": 3.0,
+    "min_vertical_ft": 1000.0,
+    "lookahead_seconds": 90
+  },
+  "aircraft": [
+    {
+      "callsign": "NKS832",
+      "role": "arrival",
+      "x_nm": 11.325,
+      "y_nm": -0.341,
+      "altitude_ft": 3072,
+      "speed_kt": 215,
+      "heading_deg": 272,
+      "status": "airborne",
+      "target_runway": "17",
+      "aircraft_type": "E190",
+      "wake_category": "light"
+    },
+    {
+      "callsign": "DAL792",
+      "role": "arrival",
+      "x_nm": -6.988,
+      "y_nm": -14.393,
+      "altitude_ft": 4227,
+      "speed_kt": 182,
+      "heading_deg": 26,
+      "status": "airborne",
+      "target_runway": "17",
+      "aircraft_type": "B77W",
+      "wake_category": "heavy"
+    },
+    {
+      "callsign": "ASA366",
+      "role": "arrival",
+      "x_nm": -3.488,
+      "y_nm": 15.615,
+      "altitude_ft": 5402,
+      "speed_kt": 210,
+      "heading_deg": 167,
+      "status": "airborne",
+      "target_runway": "17",
+      "aircraft_type": "A321",
+      "wake_category": "medium"
+    },
+    {
+      "callsign": "FDX148",
+      "role": "departure",
+      "x_nm": -0.276,
+      "y_nm": -0.049,
+      "altitude_ft": 0,
+      "speed_kt": 0,
+      "heading_deg": 170,
+      "status": "waiting_departure",
+      "target_runway": "17",
+      "aircraft_type": "A321",
+      "wake_category": "medium"
+    }
+  ],
+  "scenario_metadata": {
+    "description": "1 departure(s) are holding short of runway 17 with 3 arrival(s) inbound. Launch the queue through arrival gaps without forcing a go-around.",
+    "tags": [
+      "efficiency",
+      "safety"
+    ],
+    "difficulty_tier": "advanced",
+    "intended_stressors": [
+      "runway slot allocation",
+      "departure release timing between arrivals"
+    ],
+    "star_thresholds": [
+      1.0,
+      65.0,
+      88.0
+    ],
+    "expected_baseline_ranges": {
+      "score": [
+        0.0,
+        110.0
+      ],
+      "active_conflicts_count_total": [
+        0.0,
+        400.0
+      ],
+      "throughput_ops_per_hour": [
+        0.0,
+        80.0
+      ]
+    },
+    "generator": {
+      "name": "atc-seed",
+      "version": "1.0.0",
+      "template": "departure_pressure",
+      "seed": 47
+    }
+  }
+}

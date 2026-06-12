@@ -1,0 +1,239 @@
+{
+  "tick_sec": 5,
+  "airport": {
+    "runway_id": "21",
+    "active_runway": "21",
+    "runway_occupied_by": null,
+    "departure_queue": [
+      "FFT700",
+      "FFT669"
+    ],
+    "layout": {
+      "runways": [
+        {
+          "id": "21",
+          "ends": [
+            {
+              "x_nm": 1.3,
+              "y_nm": 2.252
+            },
+            {
+              "x_nm": -1.3,
+              "y_nm": -2.252
+            }
+          ],
+          "width_nm": 0.08
+        }
+      ],
+      "taxiways": [
+        {
+          "id": "A",
+          "points": [
+            {
+              "x_nm": 0.597,
+              "y_nm": 1.734
+            },
+            {
+              "x_nm": -0.103,
+              "y_nm": 0.521
+            },
+            {
+              "x_nm": -0.087,
+              "y_nm": 0.05
+            },
+            {
+              "x_nm": -0.787,
+              "y_nm": -1.162
+            }
+          ],
+          "width_nm": 0.04
+        },
+        {
+          "id": "B",
+          "points": [
+            {
+              "x_nm": -0.087,
+              "y_nm": 0.05
+            },
+            {
+              "x_nm": -0.693,
+              "y_nm": 0.4
+            }
+          ],
+          "width_nm": 0.04
+        }
+      ],
+      "aprons": [
+        {
+          "id": "MAIN",
+          "polygon": [
+            {
+              "x_nm": -0.546,
+              "y_nm": 1.354
+            },
+            {
+              "x_nm": -1.446,
+              "y_nm": -0.204
+            },
+            {
+              "x_nm": -1.074,
+              "y_nm": -0.419
+            },
+            {
+              "x_nm": -0.174,
+              "y_nm": 1.139
+            }
+          ]
+        }
+      ],
+      "stands": [
+        {
+          "id": "S1",
+          "position": {
+            "x_nm": -0.539,
+            "y_nm": 0.946
+          }
+        },
+        {
+          "id": "S2",
+          "position": {
+            "x_nm": -0.814,
+            "y_nm": 0.47
+          }
+        },
+        {
+          "id": "S3",
+          "position": {
+            "x_nm": -1.089,
+            "y_nm": -0.006
+          }
+        }
+      ]
+    }
+  },
+  "weather": {
+    "wind_dir_deg": 202,
+    "wind_speed_kt": 12
+  },
+  "rules": {
+    "min_horizontal_nm": 3.0,
+    "min_vertical_ft": 1000.0,
+    "lookahead_seconds": 90
+  },
+  "aircraft": [
+    {
+      "callsign": "FFT701",
+      "role": "arrival",
+      "x_nm": 11.563,
+      "y_nm": 0.393,
+      "altitude_ft": 2978,
+      "speed_kt": 216,
+      "heading_deg": 268,
+      "status": "airborne",
+      "target_runway": "21",
+      "aircraft_type": "A321",
+      "wake_category": "medium"
+    },
+    {
+      "callsign": "DAL826",
+      "role": "arrival",
+      "x_nm": -1.357,
+      "y_nm": -11.238,
+      "altitude_ft": 2940,
+      "speed_kt": 219,
+      "heading_deg": 7,
+      "status": "airborne",
+      "target_runway": "21",
+      "aircraft_type": "E190",
+      "wake_category": "light"
+    },
+    {
+      "callsign": "UPS168",
+      "role": "arrival",
+      "x_nm": 8.447,
+      "y_nm": -8.927,
+      "altitude_ft": 4616,
+      "speed_kt": 204,
+      "heading_deg": 317,
+      "status": "airborne",
+      "target_runway": "21",
+      "aircraft_type": "B738",
+      "wake_category": "medium"
+    },
+    {
+      "callsign": "JBU830",
+      "role": "arrival",
+      "x_nm": -3.042,
+      "y_nm": -15.708,
+      "altitude_ft": 5892,
+      "speed_kt": 213,
+      "heading_deg": 11,
+      "status": "airborne",
+      "target_runway": "21",
+      "aircraft_type": "B738",
+      "wake_category": "medium"
+    },
+    {
+      "callsign": "FFT700",
+      "role": "departure",
+      "x_nm": -0.242,
+      "y_nm": 0.14,
+      "altitude_ft": 0,
+      "speed_kt": 0,
+      "heading_deg": 210,
+      "status": "waiting_departure",
+      "target_runway": "21",
+      "aircraft_type": "E190",
+      "wake_category": "light"
+    },
+    {
+      "callsign": "FFT669",
+      "role": "departure",
+      "x_nm": 0.047,
+      "y_nm": 0.781,
+      "altitude_ft": 0,
+      "speed_kt": 0,
+      "heading_deg": 210,
+      "status": "waiting_departure",
+      "target_runway": "21",
+      "aircraft_type": "B738",
+      "wake_category": "medium"
+    }
+  ],
+  "scenario_metadata": {
+    "description": "FFT701 and DAL826 are converging on crossing tracks at similar altitude with nearly identical ETAs to runway 21. Break the conflict early, then rebuild the sequence.",
+    "tags": [
+      "safety"
+    ],
+    "difficulty_tier": "advanced",
+    "intended_stressors": [
+      "crossing-arrival geometry",
+      "short conflict horizon"
+    ],
+    "star_thresholds": [
+      1.0,
+      65.0,
+      88.0
+    ],
+    "expected_baseline_ranges": {
+      "score": [
+        0.0,
+        110.0
+      ],
+      "active_conflicts_count_total": [
+        0.0,
+        400.0
+      ],
+      "throughput_ops_per_hour": [
+        0.0,
+        80.0
+      ]
+    },
+    "generator": {
+      "name": "atc-seed",
+      "version": "1.0.0",
+      "template": "crossing_conflict",
+      "seed": 45
+    }
+  }
+}

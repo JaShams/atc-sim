@@ -1,0 +1,225 @@
+{
+  "tick_sec": 5,
+  "airport": {
+    "runway_id": "22",
+    "active_runway": "22",
+    "runway_occupied_by": null,
+    "departure_queue": [
+      "DAL633"
+    ],
+    "layout": {
+      "runways": [
+        {
+          "id": "22",
+          "ends": [
+            {
+              "x_nm": 1.671,
+              "y_nm": 1.992
+            },
+            {
+              "x_nm": -1.671,
+              "y_nm": -1.992
+            }
+          ],
+          "width_nm": 0.08
+        }
+      ],
+      "taxiways": [
+        {
+          "id": "A",
+          "points": [
+            {
+              "x_nm": 0.889,
+              "y_nm": 1.604
+            },
+            {
+              "x_nm": -0.011,
+              "y_nm": 0.531
+            },
+            {
+              "x_nm": -0.077,
+              "y_nm": 0.064
+            },
+            {
+              "x_nm": -0.977,
+              "y_nm": -1.008
+            }
+          ],
+          "width_nm": 0.04
+        },
+        {
+          "id": "B",
+          "points": [
+            {
+              "x_nm": -0.077,
+              "y_nm": 0.064
+            },
+            {
+              "x_nm": -0.613,
+              "y_nm": 0.514
+            }
+          ],
+          "width_nm": 0.04
+        }
+      ],
+      "aprons": [
+        {
+          "id": "MAIN",
+          "polygon": [
+            {
+              "x_nm": -0.302,
+              "y_nm": 1.429
+            },
+            {
+              "x_nm": -1.459,
+              "y_nm": 0.05
+            },
+            {
+              "x_nm": -1.13,
+              "y_nm": -0.227
+            },
+            {
+              "x_nm": 0.027,
+              "y_nm": 1.152
+            }
+          ]
+        }
+      ],
+      "stands": [
+        {
+          "id": "S1",
+          "position": {
+            "x_nm": -0.367,
+            "y_nm": 1.026
+          }
+        },
+        {
+          "id": "S2",
+          "position": {
+            "x_nm": -0.72,
+            "y_nm": 0.604
+          }
+        },
+        {
+          "id": "S3",
+          "position": {
+            "x_nm": -1.074,
+            "y_nm": 0.183
+          }
+        }
+      ]
+    }
+  },
+  "weather": {
+    "wind_dir_deg": 227,
+    "wind_speed_kt": 11
+  },
+  "rules": {
+    "min_horizontal_nm": 3.0,
+    "min_vertical_ft": 1000.0,
+    "lookahead_seconds": 90
+  },
+  "aircraft": [
+    {
+      "callsign": "JBU143",
+      "role": "arrival",
+      "x_nm": 10.834,
+      "y_nm": -4.47,
+      "altitude_ft": 3093,
+      "speed_kt": 209,
+      "heading_deg": 292,
+      "status": "airborne",
+      "target_runway": "22",
+      "aircraft_type": "B77W",
+      "wake_category": "heavy"
+    },
+    {
+      "callsign": "AAL635",
+      "role": "arrival",
+      "x_nm": 8.529,
+      "y_nm": 13.537,
+      "altitude_ft": 4187,
+      "speed_kt": 212,
+      "heading_deg": 212,
+      "status": "airborne",
+      "target_runway": "22",
+      "aircraft_type": "A321",
+      "wake_category": "medium"
+    },
+    {
+      "callsign": "NKS870",
+      "role": "arrival",
+      "x_nm": -15.995,
+      "y_nm": -0.418,
+      "altitude_ft": 5301,
+      "speed_kt": 187,
+      "heading_deg": 89,
+      "status": "airborne",
+      "target_runway": "22",
+      "aircraft_type": "B77W",
+      "wake_category": "heavy"
+    },
+    {
+      "callsign": "DAL633",
+      "role": "departure",
+      "x_nm": -0.214,
+      "y_nm": 0.18,
+      "altitude_ft": 0,
+      "speed_kt": 0,
+      "heading_deg": 220,
+      "status": "waiting_departure",
+      "target_runway": "22",
+      "aircraft_type": "A359",
+      "wake_category": "heavy"
+    }
+  ],
+  "events": [
+    {
+      "time_sec": 20,
+      "type": "engine_failure",
+      "aircraft": "NKS870",
+      "require_return_to_land": true
+    }
+  ],
+  "scenario_metadata": {
+    "description": "NKS870 loses an engine and needs priority handling shortly after you take the position, with 3 other aircraft to manage. Get the emergency on the ground first.",
+    "tags": [
+      "safety",
+      "event"
+    ],
+    "difficulty_tier": "intermediate",
+    "intended_stressors": [
+      "degraded-performance emergency return",
+      "priority resequencing under traffic"
+    ],
+    "star_thresholds": [
+      1.0,
+      60.0,
+      85.0
+    ],
+    "expected_baseline_ranges": {
+      "score": [
+        0.0,
+        110.0
+      ],
+      "active_conflicts_count_total": [
+        0.0,
+        400.0
+      ],
+      "throughput_ops_per_hour": [
+        0.0,
+        80.0
+      ],
+      "emergency_unhandled_count": [
+        0.0,
+        1.0
+      ]
+    },
+    "generator": {
+      "name": "atc-seed",
+      "version": "1.0.0",
+      "template": "emergency_inbound",
+      "seed": 48
+    }
+  }
+}

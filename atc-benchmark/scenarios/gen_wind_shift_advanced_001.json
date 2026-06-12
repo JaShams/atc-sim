@@ -1,0 +1,238 @@
+{
+  "tick_sec": 5,
+  "airport": {
+    "runway_id": "16",
+    "active_runway": "16",
+    "runway_occupied_by": null,
+    "departure_queue": [
+      "AAL106"
+    ],
+    "layout": {
+      "runways": [
+        {
+          "id": "16",
+          "ends": [
+            {
+              "x_nm": -0.889,
+              "y_nm": 2.443
+            },
+            {
+              "x_nm": 0.889,
+              "y_nm": -2.443
+            }
+          ],
+          "width_nm": 0.08
+        }
+      ],
+      "taxiways": [
+        {
+          "id": "A",
+          "points": [
+            {
+              "x_nm": -0.945,
+              "y_nm": 1.572
+            },
+            {
+              "x_nm": -0.466,
+              "y_nm": 0.256
+            },
+            {
+              "x_nm": -0.094,
+              "y_nm": -0.034
+            },
+            {
+              "x_nm": 0.385,
+              "y_nm": -1.35
+            }
+          ],
+          "width_nm": 0.04
+        },
+        {
+          "id": "B",
+          "points": [
+            {
+              "x_nm": -0.094,
+              "y_nm": -0.034
+            },
+            {
+              "x_nm": -0.752,
+              "y_nm": -0.274
+            }
+          ],
+          "width_nm": 0.04
+        }
+      ],
+      "aprons": [
+        {
+          "id": "MAIN",
+          "polygon": [
+            {
+              "x_nm": -1.388,
+              "y_nm": 0.452
+            },
+            {
+              "x_nm": -0.773,
+              "y_nm": -1.239
+            },
+            {
+              "x_nm": -0.369,
+              "y_nm": -1.092
+            },
+            {
+              "x_nm": -0.984,
+              "y_nm": 0.599
+            }
+          ]
+        }
+      ],
+      "stands": [
+        {
+          "id": "S1",
+          "position": {
+            "x_nm": -1.071,
+            "y_nm": 0.195
+          }
+        },
+        {
+          "id": "S2",
+          "position": {
+            "x_nm": -0.883,
+            "y_nm": -0.321
+          }
+        },
+        {
+          "id": "S3",
+          "position": {
+            "x_nm": -0.695,
+            "y_nm": -0.838
+          }
+        }
+      ]
+    }
+  },
+  "weather": {
+    "wind_dir_deg": 173,
+    "wind_speed_kt": 12
+  },
+  "rules": {
+    "min_horizontal_nm": 3.0,
+    "min_vertical_ft": 1000.0,
+    "lookahead_seconds": 90
+  },
+  "aircraft": [
+    {
+      "callsign": "JBU930",
+      "role": "arrival",
+      "x_nm": 10.11,
+      "y_nm": -0.027,
+      "altitude_ft": 2945,
+      "speed_kt": 220,
+      "heading_deg": 270,
+      "status": "airborne",
+      "target_runway": "16",
+      "aircraft_type": "A320",
+      "wake_category": "medium"
+    },
+    {
+      "callsign": "UPS118",
+      "role": "arrival",
+      "x_nm": -9.711,
+      "y_nm": 12.716,
+      "altitude_ft": 4296,
+      "speed_kt": 190,
+      "heading_deg": 143,
+      "status": "airborne",
+      "target_runway": "16",
+      "aircraft_type": "A321",
+      "wake_category": "medium"
+    },
+    {
+      "callsign": "UAL711",
+      "role": "arrival",
+      "x_nm": 12.673,
+      "y_nm": 9.767,
+      "altitude_ft": 5427,
+      "speed_kt": 183,
+      "heading_deg": 232,
+      "status": "airborne",
+      "target_runway": "16",
+      "aircraft_type": "B77W",
+      "wake_category": "heavy"
+    },
+    {
+      "callsign": "UAL579",
+      "role": "arrival",
+      "x_nm": 7.649,
+      "y_nm": 14.053,
+      "altitude_ft": 6683,
+      "speed_kt": 211,
+      "heading_deg": 209,
+      "status": "airborne",
+      "target_runway": "16",
+      "aircraft_type": "A359",
+      "wake_category": "heavy"
+    },
+    {
+      "callsign": "AAL106",
+      "role": "departure",
+      "x_nm": -0.263,
+      "y_nm": -0.096,
+      "altitude_ft": 0,
+      "speed_kt": 0,
+      "heading_deg": 160,
+      "status": "waiting_departure",
+      "target_runway": "16",
+      "aircraft_type": "A320",
+      "wake_category": "medium"
+    }
+  ],
+  "events": [
+    {
+      "time_sec": 45,
+      "type": "wind_change",
+      "wind_dir_deg": 328,
+      "wind_speed_kt": 16
+    }
+  ],
+  "scenario_metadata": {
+    "description": "The wind swings through 180 degrees at t+45s, turning runway 16 into a tailwind operation mid-push. Reconfigure the runway and re-sequence everyone already established.",
+    "tags": [
+      "event",
+      "safety"
+    ],
+    "difficulty_tier": "advanced",
+    "intended_stressors": [
+      "wind shift",
+      "runway reconfiguration response"
+    ],
+    "star_thresholds": [
+      1.0,
+      65.0,
+      88.0
+    ],
+    "expected_baseline_ranges": {
+      "score": [
+        0.0,
+        110.0
+      ],
+      "active_conflicts_count_total": [
+        0.0,
+        400.0
+      ],
+      "throughput_ops_per_hour": [
+        0.0,
+        80.0
+      ],
+      "emergency_unhandled_count": [
+        0.0,
+        1.0
+      ]
+    },
+    "generator": {
+      "name": "atc-seed",
+      "version": "1.0.0",
+      "template": "wind_shift",
+      "seed": 50
+    }
+  }
+}

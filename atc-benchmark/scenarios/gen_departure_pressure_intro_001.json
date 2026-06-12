@@ -1,0 +1,200 @@
+{
+  "tick_sec": 5,
+  "airport": {
+    "runway_id": "14",
+    "active_runway": "14",
+    "runway_occupied_by": null,
+    "departure_queue": [
+      "UAL796"
+    ],
+    "layout": {
+      "runways": [
+        {
+          "id": "14",
+          "ends": [
+            {
+              "x_nm": -1.671,
+              "y_nm": 1.992
+            },
+            {
+              "x_nm": 1.671,
+              "y_nm": -1.992
+            }
+          ],
+          "width_nm": 0.08
+        }
+      ],
+      "taxiways": [
+        {
+          "id": "A",
+          "points": [
+            {
+              "x_nm": -1.425,
+              "y_nm": 1.154
+            },
+            {
+              "x_nm": -0.525,
+              "y_nm": 0.081
+            },
+            {
+              "x_nm": -0.077,
+              "y_nm": -0.064
+            },
+            {
+              "x_nm": 0.823,
+              "y_nm": -1.137
+            }
+          ],
+          "width_nm": 0.04
+        },
+        {
+          "id": "B",
+          "points": [
+            {
+              "x_nm": -0.077,
+              "y_nm": -0.064
+            },
+            {
+              "x_nm": -0.613,
+              "y_nm": -0.514
+            }
+          ],
+          "width_nm": 0.04
+        }
+      ],
+      "aprons": [
+        {
+          "id": "MAIN",
+          "polygon": [
+            {
+              "x_nm": -1.459,
+              "y_nm": -0.05
+            },
+            {
+              "x_nm": -0.302,
+              "y_nm": -1.429
+            },
+            {
+              "x_nm": 0.027,
+              "y_nm": -1.152
+            },
+            {
+              "x_nm": -1.13,
+              "y_nm": 0.227
+            }
+          ]
+        }
+      ],
+      "stands": [
+        {
+          "id": "S1",
+          "position": {
+            "x_nm": -1.074,
+            "y_nm": -0.183
+          }
+        },
+        {
+          "id": "S2",
+          "position": {
+            "x_nm": -0.72,
+            "y_nm": -0.604
+          }
+        },
+        {
+          "id": "S3",
+          "position": {
+            "x_nm": -0.367,
+            "y_nm": -1.026
+          }
+        }
+      ]
+    }
+  },
+  "weather": {
+    "wind_dir_deg": 156,
+    "wind_speed_kt": 7
+  },
+  "rules": {
+    "min_horizontal_nm": 3.0,
+    "min_vertical_ft": 1000.0,
+    "lookahead_seconds": 90
+  },
+  "aircraft": [
+    {
+      "callsign": "NKS121",
+      "role": "arrival",
+      "x_nm": -7.01,
+      "y_nm": 5.548,
+      "altitude_ft": 3044,
+      "speed_kt": 192,
+      "heading_deg": 128,
+      "status": "airborne",
+      "target_runway": "14",
+      "aircraft_type": "A320",
+      "wake_category": "medium"
+    },
+    {
+      "callsign": "UPS739",
+      "role": "arrival",
+      "x_nm": 12.352,
+      "y_nm": -10.169,
+      "altitude_ft": 4132,
+      "speed_kt": 213,
+      "heading_deg": 309,
+      "status": "airborne",
+      "target_runway": "14",
+      "aircraft_type": "B77W",
+      "wake_category": "heavy"
+    },
+    {
+      "callsign": "UAL796",
+      "role": "departure",
+      "x_nm": -0.214,
+      "y_nm": -0.18,
+      "altitude_ft": 0,
+      "speed_kt": 0,
+      "heading_deg": 140,
+      "status": "waiting_departure",
+      "target_runway": "14",
+      "aircraft_type": "E190",
+      "wake_category": "light"
+    }
+  ],
+  "scenario_metadata": {
+    "description": "1 departure(s) are holding short of runway 14 with 2 arrival(s) inbound. Launch the queue through arrival gaps without forcing a go-around.",
+    "tags": [
+      "efficiency",
+      "safety"
+    ],
+    "difficulty_tier": "intro",
+    "intended_stressors": [
+      "runway slot allocation",
+      "departure release timing between arrivals"
+    ],
+    "star_thresholds": [
+      1.0,
+      55.0,
+      82.0
+    ],
+    "expected_baseline_ranges": {
+      "score": [
+        0.0,
+        110.0
+      ],
+      "active_conflicts_count_total": [
+        0.0,
+        400.0
+      ],
+      "throughput_ops_per_hour": [
+        0.0,
+        80.0
+      ]
+    },
+    "generator": {
+      "name": "atc-seed",
+      "version": "1.0.0",
+      "template": "departure_pressure",
+      "seed": 46
+    }
+  }
+}

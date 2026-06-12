@@ -3,7 +3,9 @@
   "airport": {
     "runway_id": "27",
     "active_runway": "27",
-    "departure_queue": ["DAL101"]
+    "departure_queue": [
+      "DAL101"
+    ]
   },
   "aircraft": [
     {
@@ -18,24 +20,53 @@
       "route_id": "SID-TEST1",
       "procedure_type": "SID",
       "waypoints": [
-        {"name": "SID1", "x_nm": -3.0, "y_nm": 0.0, "min_altitude_ft": 1500, "speed_kt": 180},
-        {"name": "SID2", "x_nm": -8.0, "y_nm": 2.0, "min_altitude_ft": 4000, "speed_kt": 220}
+        {
+          "name": "SID1",
+          "x_nm": -3.0,
+          "y_nm": 0.0,
+          "min_altitude_ft": 1500,
+          "speed_kt": 180
+        },
+        {
+          "name": "SID2",
+          "x_nm": -8.0,
+          "y_nm": 2.0,
+          "min_altitude_ft": 4000,
+          "speed_kt": 220
+        }
       ],
       "current_leg_index": 0,
       "current_leg_completed": false
     }
   ],
   "scenario_metadata": {
-    "tags": ["efficiency"],
+    "tags": [
+      "efficiency"
+    ],
     "difficulty_tier": "intro",
     "intended_stressors": [
       "SID climb constraints",
       "managed route tracking"
     ],
     "expected_baseline_ranges": {
-      "score": [0, 120],
-      "throughput_ops_per_hour": [0, 720],
-      "invalid_commands": [0, 20]
-    }
+      "score": [
+        0,
+        120
+      ],
+      "throughput_ops_per_hour": [
+        0,
+        720
+      ],
+      "invalid_commands": [
+        0,
+        20
+      ]
+    },
+    "description": "A single departure flies a SID with climb constraints. Launch it and let the procedure work, stepping in only if the climb needs help.",
+    "star_thresholds": [
+      1.0,
+      55.0,
+      82.0
+    ]
   }
 }

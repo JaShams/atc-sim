@@ -1,0 +1,212 @@
+{
+  "tick_sec": 5,
+  "airport": {
+    "runway_id": "26",
+    "active_runway": "26",
+    "runway_occupied_by": null,
+    "departure_queue": [
+      "UAL771"
+    ],
+    "layout": {
+      "runways": [
+        {
+          "id": "26",
+          "ends": [
+            {
+              "x_nm": 2.561,
+              "y_nm": 0.451
+            },
+            {
+              "x_nm": -2.561,
+              "y_nm": -0.451
+            }
+          ],
+          "width_nm": 0.08
+        }
+      ],
+      "taxiways": [
+        {
+          "id": "A",
+          "points": [
+            {
+              "x_nm": 1.712,
+              "y_nm": 0.657
+            },
+            {
+              "x_nm": 0.333,
+              "y_nm": 0.414
+            },
+            {
+              "x_nm": -0.017,
+              "y_nm": 0.098
+            },
+            {
+              "x_nm": -1.396,
+              "y_nm": -0.145
+            }
+          ],
+          "width_nm": 0.04
+        },
+        {
+          "id": "B",
+          "points": [
+            {
+              "x_nm": -0.017,
+              "y_nm": 0.098
+            },
+            {
+              "x_nm": -0.139,
+              "y_nm": 0.788
+            }
+          ],
+          "width_nm": 0.04
+        }
+      ],
+      "aprons": [
+        {
+          "id": "MAIN",
+          "polygon": [
+            {
+              "x_nm": 0.687,
+              "y_nm": 1.289
+            },
+            {
+              "x_nm": -1.086,
+              "y_nm": 0.976
+            },
+            {
+              "x_nm": -1.011,
+              "y_nm": 0.553
+            },
+            {
+              "x_nm": 0.761,
+              "y_nm": 0.865
+            }
+          ]
+        }
+      ],
+      "stands": [
+        {
+          "id": "S1",
+          "position": {
+            "x_nm": 0.378,
+            "y_nm": 1.021
+          }
+        },
+        {
+          "id": "S2",
+          "position": {
+            "x_nm": -0.163,
+            "y_nm": 0.926
+          }
+        },
+        {
+          "id": "S3",
+          "position": {
+            "x_nm": -0.705,
+            "y_nm": 0.83
+          }
+        }
+      ]
+    }
+  },
+  "weather": {
+    "wind_dir_deg": 268,
+    "wind_speed_kt": 5
+  },
+  "rules": {
+    "min_horizontal_nm": 3.0,
+    "min_vertical_ft": 1000.0,
+    "lookahead_seconds": 90
+  },
+  "aircraft": [
+    {
+      "callsign": "DAL748",
+      "role": "arrival",
+      "x_nm": -5.569,
+      "y_nm": 8.342,
+      "altitude_ft": 3394,
+      "speed_kt": 213,
+      "heading_deg": 146,
+      "status": "airborne",
+      "target_runway": "26",
+      "aircraft_type": "A359",
+      "wake_category": "heavy"
+    },
+    {
+      "callsign": "UPS886",
+      "role": "arrival",
+      "x_nm": 7.964,
+      "y_nm": 6.904,
+      "altitude_ft": 3541,
+      "speed_kt": 208,
+      "heading_deg": 229,
+      "status": "airborne",
+      "target_runway": "26",
+      "aircraft_type": "A321",
+      "wake_category": "medium"
+    },
+    {
+      "callsign": "AAL131",
+      "role": "arrival",
+      "x_nm": 9.116,
+      "y_nm": 1.314,
+      "altitude_ft": 4524,
+      "speed_kt": 225,
+      "heading_deg": 262,
+      "status": "airborne",
+      "target_runway": "26",
+      "aircraft_type": "A359",
+      "wake_category": "heavy"
+    },
+    {
+      "callsign": "UAL771",
+      "role": "departure",
+      "x_nm": -0.049,
+      "y_nm": 0.276,
+      "altitude_ft": 0,
+      "speed_kt": 0,
+      "heading_deg": 260,
+      "status": "waiting_departure",
+      "target_runway": "26",
+      "aircraft_type": "B77W",
+      "wake_category": "heavy"
+    }
+  ],
+  "scenario_metadata": {
+    "description": "DAL748 and UPS886 are converging on crossing tracks at similar altitude with nearly identical ETAs to runway 26. Break the conflict early, then rebuild the sequence.",
+    "tags": [
+      "safety"
+    ],
+    "difficulty_tier": "intermediate",
+    "intended_stressors": [
+      "crossing-arrival geometry",
+      "short conflict horizon"
+    ],
+    "star_thresholds": [
+      1.0,
+      60.0,
+      85.0
+    ],
+    "expected_baseline_ranges": {
+      "score": [
+        0.0,
+        110.0
+      ],
+      "active_conflicts_count_total": [
+        0.0,
+        400.0
+      ],
+      "throughput_ops_per_hour": [
+        0.0,
+        80.0
+      ]
+    },
+    "generator": {
+      "name": "atc-seed",
+      "version": "1.0.0",
+      "template": "crossing_conflict",
+      "seed": 44
+    }
+  }
+}

@@ -10,7 +10,7 @@
 
 ## File structure (v1)
 
-- `scenarios/`: hand-authored deterministic scenario JSONs.
+- `scenarios/`: deterministic scenario JSONs (hand-authored, plus `gen_*` files from `atc-seed`).
 - `src/atc_benchmark/simulator/`: world models, engine, conflict detection, decision points, validation.
 - `src/atc_benchmark/agents/`: model-agnostic controller interface + baseline heuristic.
 - `src/atc_benchmark/runner/`: CLI entrypoint.
@@ -25,6 +25,29 @@ atc-run scenarios/crossing_conflict_001.json
 atc-batch --agents heuristic,noop,random
 pytest
 ```
+
+## Seeding scenarios (levels)
+
+`atc-seed` procedurally generates scenario JSONs with complete `scenario_metadata`
+(description, tags, difficulty tier, stressors, star thresholds, expected baseline
+ranges, and generator provenance). Generation is deterministic per seed.
+
+```bash
+# Curated multi-template level pack (10 levels across tiers)
+atc-seed --pack starter --seed 42
+
+# Variants of one template at one tier
+atc-seed --template emergency_inbound --tier expert --count 3 --seed 7
+
+# Validate without writing
+atc-seed --pack starter --seed 42 --dry-run
+```
+
+Templates: `arrival_rush`, `crossing_conflict`, `departure_pressure`,
+`emergency_inbound`, `wind_shift`. Tiers: `tutorial`, `intro`, `intermediate`,
+`advanced`, `expert`. Files are written to `scenarios/` by default (override with
+`--out`), named `gen_<template>_<tier>_NNN.json`, and validated with
+`validate_scenario_document` before writing.
 
 ## Live Mode
 
