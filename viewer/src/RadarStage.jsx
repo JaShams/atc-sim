@@ -3,20 +3,20 @@ import { Stage, Layer, Rect, Line, Circle, Text, Arrow, Group } from 'react-konv
 import { humanize, runwayWorldPoints } from './useViewerState';
 
 const palette = {
-  arrival: '#22f4ff',
-  departure: '#ffb23f',
-  normal: '#9fb2bd',
+  arrival: '#00d8ff',
+  departure: '#ffb02e',
+  normal: '#95a9b5',
   emergency: '#ffffff',
-  predicted: '#b6c5cc',
-  conflict: '#ff2f55',
-  landed: '#51606a',
-  runway: 'rgba(222, 234, 240, 0.58)',
-  text: '#f4f7f8',
-  mutedText: '#8ea0aa',
-  structure: 'rgba(180, 198, 210, 0.16)',
-  structureStrong: 'rgba(214, 228, 238, 0.28)',
-  void: '#0b0f12',
-  grid: 'rgba(180, 198, 210, 0.045)'
+  predicted: '#8fa7b5',
+  conflict: '#ff4d6d',
+  landed: '#46555f',
+  runway: 'rgba(210, 226, 235, 0.5)',
+  text: '#e9f1f5',
+  mutedText: '#7e93a0',
+  structure: 'rgba(148, 173, 192, 0.14)',
+  structureStrong: 'rgba(175, 200, 218, 0.24)',
+  void: '#060a0e',
+  grid: 'rgba(148, 173, 192, 0.035)'
 };
 
 const LIVE_INTERPOLATION = {
@@ -386,7 +386,7 @@ export default function RadarStage({
             const history = trails.get(ac.callsign);
             if (!history || history.length < 2) return null;
             const isDeparture = String(ac.role || '').toLowerCase() === 'departure';
-            const trailColor = isDeparture ? '255, 178, 63' : '34, 244, 255';
+            const trailColor = isDeparture ? '255, 176, 46' : '0, 216, 255';
             return (
               <Group key={`trail-${ac.callsign}`}>
                 {history.slice(0, -1).map((point, idx) => {
@@ -452,7 +452,17 @@ export default function RadarStage({
                 )}
 
                 {/* Target Dot */}
-                <Circle x={x} y={y} radius={isLanded ? 3.5 : 5} stroke={color} strokeWidth={1.25} fill={isLanded ? color : palette.void} />
+                <Circle
+                  x={x}
+                  y={y}
+                  radius={isLanded ? 3.5 : 5}
+                  stroke={color}
+                  strokeWidth={1.25}
+                  fill={isLanded ? color : palette.void}
+                  shadowColor={color}
+                  shadowBlur={isLanded ? 0 : 10}
+                  shadowOpacity={0.55}
+                />
 
                 {/* Heading line vector */}
                 {!isLanded && (
@@ -533,12 +543,12 @@ function RangeRings({ projectPoint, pixelRadiusForNm }) {
         if (!Number.isFinite(radius) || radius < 12) return null;
         return (
           <Group key={`ring-${nm}`}>
-            <Circle x={center.x} y={center.y} radius={radius} stroke="rgba(180, 198, 210, 0.08)" strokeWidth={1} />
+            <Circle x={center.x} y={center.y} radius={radius} stroke="rgba(148, 173, 192, 0.07)" strokeWidth={1} />
             <Text
               x={center.x + 4}
               y={center.y - radius + 4}
               text={`${nm}`}
-              fill="rgba(180, 198, 210, 0.22)"
+              fill="rgba(148, 173, 192, 0.25)"
               fontFamily='"JetBrains Mono", "Fira Code", Consolas, monospace'
               fontSize={9}
             />
@@ -555,12 +565,12 @@ function SeparationRing({ aircraft, projectPoint, pixelRadiusForNm }) {
   if (!Number.isFinite(radius) || radius < 6) return null;
   return (
     <Group>
-      <Circle x={x} y={y} radius={radius} stroke="rgba(34, 244, 255, 0.28)" strokeWidth={1} dash={[5, 6]} />
+      <Circle x={x} y={y} radius={radius} stroke="rgba(0, 216, 255, 0.28)" strokeWidth={1} dash={[5, 6]} />
       <Text
         x={x + radius * 0.72}
         y={y - radius * 0.72}
         text="3nm"
-        fill="rgba(34, 244, 255, 0.4)"
+        fill="rgba(0, 216, 255, 0.45)"
         fontFamily='"JetBrains Mono", "Fira Code", Consolas, monospace'
         fontSize={9}
       />
@@ -636,8 +646,8 @@ function AirportLayout({ layout, activeRunwayId, projectPoint, getViewBounds, si
             <Line
               points={points}
               closed
-              fill="rgba(80, 96, 105, 0.08)"
-              stroke="rgba(180, 198, 210, 0.14)"
+              fill="rgba(80, 96, 105, 0.07)"
+              stroke="rgba(148, 173, 192, 0.12)"
               strokeWidth={1}
             />
             {apron.id && (
@@ -645,7 +655,7 @@ function AirportLayout({ layout, activeRunwayId, projectPoint, getViewBounds, si
                 x={labelPt.x + 6}
                 y={labelPt.y - 6}
                 text={apron.id}
-                fill="rgba(180, 198, 210, 0.42)"
+                fill="rgba(148, 173, 192, 0.4)"
                 fontFamily="JetBrains Mono, Fira Code, Consolas, monospace"
                 fontSize={9}
               />
@@ -668,7 +678,7 @@ function AirportLayout({ layout, activeRunwayId, projectPoint, getViewBounds, si
           <Line
             key={`taxiway-${i}`}
             points={points}
-            stroke="rgba(180, 198, 210, 0.16)"
+            stroke="rgba(148, 173, 192, 0.14)"
             strokeWidth={width}
             lineCap="round"
           />
@@ -711,13 +721,13 @@ function AirportLayout({ layout, activeRunwayId, projectPoint, getViewBounds, si
 
         return (
           <Group key={`stand-${i}`}>
-            <Circle x={x} y={y} radius={4} fill="rgba(180, 198, 210, 0.34)" stroke="#0b0f12" strokeWidth={1} />
+            <Circle x={x} y={y} radius={4} fill="rgba(148, 173, 192, 0.32)" stroke="#060a0e" strokeWidth={1} />
             {stand.id && (
               <Text
                 x={x + 7}
                 y={y + 4}
                 text={stand.id}
-                fill="rgba(180, 198, 210, 0.46)"
+                fill="rgba(148, 173, 192, 0.44)"
                 fontFamily='"JetBrains Mono", "Fira Code", Consolas, monospace'
                 fontSize={9}
               />
@@ -787,8 +797,8 @@ function LayoutRunway({ runwayId, ptA, ptB, widthNm, scale, isActive }) {
       <Line
         points={points}
         closed
-        fill={isActive ? 'rgba(180, 198, 210, 0.08)' : 'rgba(100, 116, 139, 0.05)'}
-        stroke={isActive ? 'rgba(222, 234, 240, 0.4)' : 'rgba(148, 163, 184, 0.18)'}
+        fill={isActive ? 'rgba(148, 173, 192, 0.07)' : 'rgba(100, 116, 139, 0.04)'}
+        stroke={isActive ? 'rgba(210, 226, 235, 0.38)' : 'rgba(148, 163, 184, 0.16)'}
         strokeWidth={1}
       />
 
@@ -796,7 +806,7 @@ function LayoutRunway({ runwayId, ptA, ptB, widthNm, scale, isActive }) {
       {lengthPx > 90 && (
         <Line
           points={[x1 + dx * 20, y1 + dy * 20, x2 - dx * 20, y2 - dy * 20]}
-          stroke={isActive ? 'rgba(244, 247, 248, 0.42)' : 'rgba(203, 213, 225, 0.2)'}
+          stroke={isActive ? 'rgba(233, 241, 245, 0.4)' : 'rgba(203, 213, 225, 0.18)'}
           strokeWidth={1}
           dash={[18, 12]}
         />
@@ -805,12 +815,12 @@ function LayoutRunway({ runwayId, ptA, ptB, widthNm, scale, isActive }) {
       {/* Endmarks */}
       <Line
         points={[x1 + px * width * 0.8, y1 + py * width * 0.8, x1 - px * width * 0.8, y1 - py * width * 0.8]}
-        stroke={isActive ? 'rgba(244, 247, 248, 0.72)' : 'rgba(203, 213, 225, 0.3)'}
+        stroke={isActive ? 'rgba(233, 241, 245, 0.7)' : 'rgba(203, 213, 225, 0.28)'}
         strokeWidth={2}
       />
       <Line
         points={[x2 + px * width * 0.8, y2 + py * width * 0.8, x2 - px * width * 0.8, y2 - py * width * 0.8]}
-        stroke={isActive ? 'rgba(244, 247, 248, 0.72)' : 'rgba(203, 213, 225, 0.3)'}
+        stroke={isActive ? 'rgba(233, 241, 245, 0.7)' : 'rgba(203, 213, 225, 0.28)'}
         strokeWidth={2}
       />
 
@@ -819,7 +829,7 @@ function LayoutRunway({ runwayId, ptA, ptB, widthNm, scale, isActive }) {
         x={x1 - dx * 16}
         y={y1 - dy * 16}
         text={runwayId}
-        fill={isActive ? '#f4f7f8' : 'rgba(203, 213, 225, 0.46)'}
+        fill={isActive ? '#e9f1f5' : 'rgba(203, 213, 225, 0.44)'}
         fontFamily='"JetBrains Mono", "Fira Code", Consolas, monospace'
         fontSize={11}
         fontStyle="700"
@@ -831,7 +841,7 @@ function LayoutRunway({ runwayId, ptA, ptB, widthNm, scale, isActive }) {
         x={x2 + dx * 16}
         y={y2 + dy * 16}
         text={opposite()}
-        fill={isActive ? '#f4f7f8' : 'rgba(203, 213, 225, 0.46)'}
+        fill={isActive ? '#e9f1f5' : 'rgba(203, 213, 225, 0.44)'}
         fontFamily='"JetBrains Mono", "Fira Code", Consolas, monospace'
         fontSize={11}
         fontStyle="700"
@@ -871,9 +881,11 @@ function AircraftTagCard({ aircraft, x, y, color, isConflict, isPredicted }) {
         y={labelY}
         width={tagWidth}
         height={tagHeight}
-        fill="rgba(3, 5, 6, 0.76)"
+        cornerRadius={4}
+        fill="rgba(4, 7, 10, 0.84)"
         stroke={isConflict ? palette.conflict : color}
         strokeWidth={1}
+        opacity={isConflict ? 1 : 0.92}
       />
 
       {/* Alert strip */}
@@ -882,6 +894,7 @@ function AircraftTagCard({ aircraft, x, y, color, isConflict, isPredicted }) {
         y={labelY}
         width={3}
         height={tagHeight}
+        cornerRadius={[4, 0, 0, 4]}
         fill={isConflict ? palette.conflict : color}
       />
 
@@ -964,7 +977,7 @@ function PredictionOverlay({ aircraft, airportState = {}, projectPoint }) {
       {/* Path Line */}
       <Line
         points={linePoints}
-        stroke="rgba(244, 247, 248, 0.72)"
+        stroke="rgba(233, 241, 245, 0.7)"
         strokeWidth={1}
         dash={[4, 5]}
       />
@@ -974,12 +987,12 @@ function PredictionOverlay({ aircraft, airportState = {}, projectPoint }) {
         const { x, y } = projectPoint(point.x_nm, point.y_nm);
         return (
           <Group key={`marker-${idx}`}>
-            <Circle x={x} y={y} radius={2.8} fill="rgba(244, 247, 248, 0.9)" />
+            <Circle x={x} y={y} radius={2.8} fill="rgba(233, 241, 245, 0.9)" />
             <Text
               x={x + 6}
               y={y - 6}
               text={`+${idx + 1}m`}
-              fill="rgba(244, 247, 248, 0.9)"
+              fill="rgba(233, 241, 245, 0.9)"
               fontFamily='"JetBrains Mono", "Fira Code", Consolas, monospace'
               fontSize={10}
             />
